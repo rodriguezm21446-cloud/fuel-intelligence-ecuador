@@ -1,0 +1,26 @@
+[Unit]
+Description=Fuel Intelligence Ecuador
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fuelintel
+Group=fuelintel
+WorkingDirectory=/opt/fuelintel
+EnvironmentFile=/etc/fuelintel/fuelintel.env
+ExecStart=/opt/fuelintel/.venv/bin/python -m fuelintel.main
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/fuelintel/data
+MemoryMax=512M
+CPUQuota=60%
+
+[Install]
+WantedBy=multi-user.target
+

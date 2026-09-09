@@ -1,0 +1,294 @@
+from __future__ import annotations
+
+import hashlib
+import html
+import re
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
+from urllib.parse import urljoin
+
+from .extractors import extract_pdf_text
+from .models import Candidate, SourceSpec
+from .storage import Store
+from .text import canonical_url, collapse_spaces, fold
+
+
+USER_AGENT = "FuelIntelligenceEcuador/0.1 (+private research monitor; respectful conditional polling)"
+
+
+@dataclass(frozen=True, slots=True)
+class FetchResult:
+    status: int
+    url: str
+    content_type: str
+    body: bytes
+    etag: str | None
+    last_modified: str | None
+
+
+class HttpClient:
+    def __init__(self, timeout: int = 20):
+        self.timeout = timeout
+
+    def get(self, url: str, etag: str | None = None, last_modified: str | None = None) -> FetchResult:
+        headers = {"User-Agent": USER_AGENT, "Accept": "application/rss+xml, application/xml, text/html, application/pdf;q=0.9, */*;q=0.5"}
+        if etag:
+            headers["If-None-Match"] = etag
+        if last_modified:
+            headers["If-Modified-Since"] = last_modified
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return FetchResult(
+                    status=response.status,
+                    url=response.geturl(),
+                    content_type=response.headers.get_content_type(),
+                    body=response.read(),
+                    etag=response.headers.get("ETag"),
+                    last_modified=response.headers.get("Last-Modified"),
+                )
+        except urllib.error.HTTPError as exc:
+            if exc.code == 304:
+                return FetchResult(304, url, "", b"", etag, last_modified)
+            raise
+
+
+class PageParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._skip = 0
+        self._href: str | None = None
+        self._anchor_text: list[str] = []
+        self.text: list[str] = []
+        self.links: list[tuple[str, str]] = []
+        self.title = ""
+        self._in_title = False
+        self.published_at: datetime | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip += 1
+            return
+        if tag == "a" and self._skip == 0:
+            self._href = values.get("href")
+            self._anchor_text = []
+        if tag == "title":
+            self._in_title = True
+        if tag == "time" and values.get("datetime"):
+            self.published_at = parse_datetime(values["datetime"])
+        if tag == "meta":
+            key = (values.get("property") or values.get("name") or "").lower()
+            if key in {"article:published_time", "datepublished", "date"} and values.get("content"):
+                self.published_at = parse_datetime(values["content"])
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "noscript", "svg"} and self._skip:
+            self._skip -= 1
+            return
+        if tag == "a" and self._href is not None:
+            label = collapse_spaces(" ".join(self._anchor_text))
+            if label:
+                self.links.append((self._href, label))
+            self._href = None
+            self._anchor_text = []
+        if tag == "title":
+            self._in_title = False
+
+    def handle_data(self, data: str) -> None:
+        if self._skip:
+            return
+        value = collapse_spaces(data)
+        if not value:
+            return
+        self.text.append(value)
+        if self._href is not None:
+            self._anchor_text.append(value)
+        if self._in_title:
+            self.title = collapse_spaces(f"{self.title} {value}")
+
+
+def parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = value.strip()
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _child_text(element: ET.Element, names: set[str]) -> str:
+    for child in element.iter():
+        name = child.tag.rsplit("}", 1)[-1].lower()
+        if name in names and child.text:
+            return collapse_spaces(html.unescape(child.text))
+    return ""
+
+
+def _atom_link(element: ET.Element) -> str:
+    for child in element.iter():
+        if child.tag.rsplit("}", 1)[-1].lower() != "link":
+            continue
+        href = child.attrib.get("href")
+        if href and child.attrib.get("rel", "alternate") in {"alternate", ""}:
+            return href
+        if child.text:
+            return child.text.strip()
+    return ""
+
+
+def parse_rss(source: SourceSpec, payload: bytes, detected_at: datetime) -> list[Candidate]:
+    root = ET.fromstring(payload)
+    entries = [node for node in root.iter() if node.tag.rsplit("}", 1)[-1].lower() in {"item", "entry"}]
+    candidates: list[Candidate] = []
+    for entry in entries[:50]:
+        title = _child_text(entry, {"title"})
+        link = _child_text(entry, {"link"}) or _atom_link(entry)
+        summary = _child_text(entry, {"description", "summary", "content"})
+        date_raw = _child_text(entry, {"pubdate", "published", "updated", "date"})
+        if not title or not link:
+            continue
+        candidates.append(
+            Candidate(
+                source=source,
+                title=title,
+                url=urljoin(source.url, link),
+                summary=re.sub(r"<[^>]+>", " ", summary),
+                published_at=parse_datetime(date_raw),
+                detected_at=detected_at,
+                raw_kind="rss",
+            )
+        )
+    return candidates
+
+
+def parse_html(source: SourceSpec, payload: bytes, detected_at: datetime, final_url: str) -> list[Candidate]:
+    text = payload.decode("utf-8", errors="replace")
+    parser = PageParser()
+    parser.feed(text)
+    body = collapse_spaces(" ".join(parser.text))
+    if source.kind == "html":
+        return [
+            Candidate(
+                source=source,
+                title=parser.title or source.name,
+                url=final_url,
+                body=body,
+                published_at=parser.published_at,
+                detected_at=detected_at,
+                raw_kind="html",
+            )
+        ]
+
+    seen: set[str] = set()
+    candidates: list[Candidate] = []
+    for href, label in parser.links:
+        url = canonical_url(urljoin(final_url, href))
+        if url in seen or url.startswith(("mailto:", "javascript:")):
+            continue
+        seen.add(url)
+        candidates.append(
+            Candidate(
+                source=source,
+                title=label,
+                url=url,
+                detected_at=detected_at,
+                raw_kind="link",
+            )
+        )
+    return candidates[:100]
+
+
+class SourcePoller:
+    def __init__(self, client: HttpClient, store: Store):
+        self.client = client
+        self.store = store
+
+    def poll(self, source: SourceSpec, detected_at: datetime) -> tuple[list[Candidate], bool]:
+        state = self.store.source_state(source.id)
+        is_bootstrap = not bool(state.get("content_hash"))
+        try:
+            result = self.client.get(
+                source.url,
+                etag=state.get("etag") if isinstance(state.get("etag"), str) else None,
+                last_modified=state.get("last_modified") if isinstance(state.get("last_modified"), str) else None,
+            )
+            if result.status == 304:
+                self.store.update_source_state(source.id)
+                return [], is_bootstrap
+
+            digest = hashlib.sha256(result.body).hexdigest()
+            if digest == state.get("content_hash"):
+                self.store.update_source_state(
+                    source.id,
+                    etag=result.etag,
+                    last_modified=result.last_modified,
+                    content_hash=digest,
+                )
+                return [], is_bootstrap
+
+            content_type = result.content_type.lower()
+            if source.kind == "rss" or "xml" in content_type:
+                candidates = parse_rss(source, result.body, detected_at)
+            elif "pdf" in content_type or result.url.lower().endswith(".pdf"):
+                document_text = extract_pdf_text(result.body)
+                candidates = [
+                    Candidate(
+                        source=source,
+                        title=source.name,
+                        url=result.url,
+                        body=document_text,
+                        published_at=detected_at,
+                        detected_at=detected_at,
+                        raw_kind="pdf",
+                    )
+                ]
+            else:
+                candidates = parse_html(source, result.body, detected_at, result.url)
+
+            for candidate in candidates:
+                candidate.content_hash = hashlib.sha256(
+                    f"{canonical_url(candidate.url)}\n{fold(candidate.title)}\n{fold(candidate.summary or candidate.body)}".encode("utf-8")
+                ).hexdigest()
+            self.store.update_source_state(
+                source.id,
+                etag=result.etag,
+                last_modified=result.last_modified,
+                content_hash=digest,
+            )
+            return candidates, is_bootstrap
+        except Exception as exc:
+            self.store.update_source_state(source.id, error=f"{type(exc).__name__}: {exc}")
+            raise
+
+    def enrich(self, candidate: Candidate) -> Candidate:
+        if candidate.raw_kind not in {"link", "rss"}:
+            return candidate
+        try:
+            result = self.client.get(candidate.url)
+        except Exception:
+            return candidate
+        if "pdf" in result.content_type or result.url.lower().endswith(".pdf"):
+            candidate.body = extract_pdf_text(result.body)
+            candidate.raw_kind = "pdf"
+        elif "html" in result.content_type:
+            parser = PageParser()
+            parser.feed(result.body.decode("utf-8", errors="replace"))
+            candidate.body = collapse_spaces(" ".join(parser.text))
+            candidate.published_at = candidate.published_at or parser.published_at
+        candidate.content_hash = hashlib.sha256(
+            f"{canonical_url(candidate.url)}\n{fold(candidate.title)}\n{fold(candidate.summary or candidate.body)}".encode("utf-8")
+        ).hexdigest()
+        return candidate

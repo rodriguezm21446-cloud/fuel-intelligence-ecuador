@@ -1,0 +1,87 @@
+[
+  {
+    "id": "arch-precios",
+    "name": "ARCH - Precios de derivados",
+    "url": "https://controlhidrocarburos.gob.ec/precios-gasolinas-extra-y-ecopais/",
+    "kind": "html",
+    "trust": 100,
+    "country": "EC",
+    "critical": true,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 600,
+    "burst_days": [10, 11, 12, 13],
+    "max_age_hours": 744
+  },
+  {
+    "id": "arch-biblioteca",
+    "name": "ARCH - Biblioteca y resoluciones",
+    "url": "https://controlhidrocarburos.gob.ec/biblioteca/",
+    "kind": "html_links",
+    "trust": 100,
+    "country": "EC",
+    "critical": true,
+    "poll_seconds": 120,
+    "idle_poll_seconds": 300,
+    "max_age_hours": 72
+  },
+  {
+    "id": "presidencia-decretos",
+    "name": "Presidencia - Decretos",
+    "url": "https://minka.presidencia.gob.ec/",
+    "kind": "html_links",
+    "trust": 100,
+    "country": "EC",
+    "critical": true,
+    "poll_seconds": 120,
+    "idle_poll_seconds": 300,
+    "max_age_hours": 72
+  },
+  {
+    "id": "bce-petroleo",
+    "name": "Banco Central del Ecuador - Estadísticas petroleras",
+    "url": "https://contenido.bce.fin.ec/?bcedata_grid_app=1",
+    "kind": "html",
+    "trust": 100,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 1800,
+    "idle_poll_seconds": 3600,
+    "max_age_hours": 744
+  },
+  {
+    "id": "eluniverso-economia-rss",
+    "name": "El Universo - Economía RSS",
+    "url": "https://www.eluniverso.com/arc/outboundfeeds/rss-subsection/noticias/economia?outputType=xml",
+    "kind": "rss",
+    "trust": 75,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 90,
+    "max_age_hours": 36
+  },
+  {
+    "id": "primicias-economia",
+    "name": "Primicias - Economía",
+    "url": "https://www.primicias.ec/economia/",
+    "kind": "html_links",
+    "trust": 75,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 90,
+    "idle_poll_seconds": 180,
+    "max_age_hours": 36
+  },
+  {
+    "id": "opec-press",
+    "name": "OPEP - Comunicados",
+    "url": "https://www.opec.org/",
+    "kind": "html_links",
+    "trust": 95,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 180,
+    "idle_poll_seconds": 300,
+    "max_age_hours": 72
+  }
+]

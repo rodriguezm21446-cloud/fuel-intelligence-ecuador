@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fuelintel-ecuador",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fuelintel-memory",
+      "database_id": "a0a6143e-8b44-4dbb-86ab-2b77435199a3",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "GITHUB_WORKFLOW": "cloud-job.yml",
+    "GITHUB_REF": "main"
+  }
+}

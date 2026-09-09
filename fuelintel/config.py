@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from .models import SourceSpec
+
+
+def load_env_file(path: Path) -> None:
+    """Load KEY=VALUE settings without replacing values already in the environment."""
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key and key.replace("_", "").isalnum():
+            os.environ.setdefault(key, value.strip())
+
+
+def _bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on", "sí", "si"}
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    data_dir: Path
+    sources_file: Path
+    timezone_name: str
+    dashboard_hours: int
+    news_max_age_hours: int
+    request_timeout_seconds: int
+    supabase_sync_minutes: int
+    dry_run: bool
+    telegram_enabled: bool
+    telegram_token: str
+    telegram_chat_id: str
+    supabase_url: str
+    supabase_service_key: str
+
+    @property
+    def timezone(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone_name)
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        env_path = Path(os.getenv("FUELINTEL_ENV_FILE", "data/secrets/telegram.env"))
+        load_env_file(env_path)
+        return cls(
+            data_dir=Path(os.getenv("FUELINTEL_DATA_DIR", "./data")),
+            sources_file=Path(os.getenv("FUELINTEL_SOURCES_FILE", "./config/sources.json")),
+            timezone_name=os.getenv("FUELINTEL_TIMEZONE", "America/Guayaquil"),
+            dashboard_hours=int(os.getenv("FUELINTEL_DASHBOARD_HOURS", "10")),
+            news_max_age_hours=int(os.getenv("FUELINTEL_NEWS_MAX_AGE_HOURS", "36")),
+            request_timeout_seconds=int(os.getenv("FUELINTEL_REQUEST_TIMEOUT_SECONDS", "20")),
+            supabase_sync_minutes=int(os.getenv("FUELINTEL_SUPABASE_SYNC_MINUTES", "10")),
+            dry_run=_bool("FUELINTEL_DRY_RUN", True),
+            telegram_enabled=_bool("FUELINTEL_TELEGRAM_ENABLED", False),
+            telegram_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+            telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
+            supabase_url=os.getenv("SUPABASE_URL", "").rstrip("/"),
+            supabase_service_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
+        )
+
+    def validate_activation(self) -> None:
+        if self.telegram_enabled and not self.dry_run:
+            if not self.telegram_token or not self.telegram_chat_id:
+                raise ValueError("Telegram está activo pero faltan TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID")
+
+
+def load_sources(path: Path) -> list[SourceSpec]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    sources = [SourceSpec.from_dict(item) for item in raw]
+    ids = [source.id for source in sources]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Hay identificadores de fuentes duplicados")
+    return [source for source in sources if source.enabled]

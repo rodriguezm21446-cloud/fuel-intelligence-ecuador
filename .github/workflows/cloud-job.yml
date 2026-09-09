@@ -1,0 +1,93 @@
+name: Fuel Intelligence Cloud Job
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_id:
+        description: Source identifier selected by Cloudflare
+        required: true
+        type: string
+      source_name:
+        description: Human-readable source name
+        required: true
+        type: string
+      source_url:
+        description: Monitored source URL
+        required: true
+        type: string
+      event_url:
+        description: New article or document URL
+        required: true
+        type: string
+      event_title:
+        description: New article or document title
+        required: true
+        type: string
+      detected_at:
+        description: UTC detection timestamp
+        required: true
+        type: string
+      corroborated_by:
+        description: Independent confirming source when required
+        required: false
+        type: string
+  schedule:
+    - cron: "17 */10 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuelintel-state
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FUELINTEL_DATA_DIR: data/runtime
+      FUELINTEL_DRY_RUN: "false"
+      FUELINTEL_TELEGRAM_ENABLED: "true"
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
+      FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
+      FUELINTEL_EVENT_TITLE: ${{ inputs.event_title }}
+      FUELINTEL_EVENT_DETECTED_AT: ${{ inputs.detected_at }}
+      FUELINTEL_EVENT_CORROBORATED_BY: ${{ inputs.corroborated_by }}
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restore analysis memory
+        uses: actions/cache/restore@v4
+        with:
+          path: data/runtime
+          key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuelintel-state-
+
+      - name: Install verified dependencies
+        run: python -m pip install --disable-pip-version-check .
+
+      - name: Analyze detected event
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m fuelintel.cloud_job
+
+      - name: Generate scheduled dashboard
+        if: github.event_name == 'schedule'
+        run: python -m fuelintel.main --dashboard
+
+      - name: Save analysis memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/runtime
+          key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
