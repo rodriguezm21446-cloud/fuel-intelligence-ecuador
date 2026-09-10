@@ -36,7 +36,7 @@ on:
         required: false
         type: string
   schedule:
-    - cron: "17 */10 * * *"
+    - cron: "17 */5 * * *"
 
 permissions:
   contents: read
@@ -57,7 +57,7 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: gemini-3.5-flash-lite
-      FUELINTEL_AI_REVISION: "5"
+      FUELINTEL_AI_REVISION: "6"
       FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
       FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
       FUELINTEL_EVENT_TITLE: ${{ inputs.event_title }}
@@ -111,6 +111,25 @@ jobs:
           if result is None:
               raise SystemExit(f"Gemini no confirmó una respuesta: {editor.last_error}")
           print("Gemini respondió correctamente; texto para X dentro del límite:", len(result.x_text))
+          PY
+
+      - name: Generate and send OpenBB test chart
+        if: github.event_name == 'push'
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from fuelintel.openbb_chart import generate_openbb_market_chart
+          from fuelintel.telegram import TelegramNotifier
+
+          chart = generate_openbb_market_chart(Path("data/runtime/charts/openbb-test.png"))
+          if chart is None:
+              raise SystemExit("OpenBB no entregó una serie verificable")
+          sent = TelegramNotifier(
+              os.environ["TELEGRAM_BOT_TOKEN"], os.environ["TELEGRAM_CHAT_ID"], True, False
+          ).send_photo(chart, "PRUEBA — OpenBB: WTI, Brent y Stoch RSI. Datos y fuentes al pie.")
+          if not sent:
+              raise SystemExit("Telegram no confirmó el gráfico OpenBB")
           PY
 
       - name: Verify Telegram connection
