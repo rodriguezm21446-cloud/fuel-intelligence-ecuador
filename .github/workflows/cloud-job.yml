@@ -55,8 +55,8 @@ jobs:
       FUELINTEL_TELEGRAM_ENABLED: "true"
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-      DEEPSEEK_MODEL: deepseek-v4-flash
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-2.5-flash-lite
       FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
       FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
       FUELINTEL_EVENT_TITLE: ${{ inputs.event_title }}
@@ -91,6 +91,26 @@ jobs:
         if: github.event_name == 'schedule'
         run: python -m fuelintel.main --dashboard
 
+      - name: Verify Gemini connection
+        if: github.event_name == 'push'
+        run: |
+          python - <<'PY'
+          import os
+          from fuelintel.ai import GeminiEditor
+
+          editor = GeminiEditor(
+              os.environ.get("GEMINI_API_KEY", ""),
+              os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+          )
+          result = editor.review(
+              "Prueba técnica. Extra cuesta $3,21 por galón. No añadas información.",
+              "Prueba técnica de Gemini para Fuel Intelligence Ecuador.",
+          )
+          if result is None:
+              raise SystemExit("Gemini no confirmó una respuesta estructurada")
+          print("Gemini respondió correctamente; texto para X dentro del límite:", len(result.x_text))
+          PY
+
       - name: Verify Telegram connection
         if: github.event_name == 'push'
         run: |
@@ -106,7 +126,7 @@ jobs:
           )
           sent = notifier.send_text(
               "PRUEBA TÉCNICA — Fuel Intelligence Ecuador\n"
-              "GitHub Actions, Python y Telegram quedaron conectados. "
+              "GitHub Actions, Python, Gemini y Telegram quedaron conectados. "
               "Este mensaje no es una noticia."
           )
           if not sent:
