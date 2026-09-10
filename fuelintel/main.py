@@ -94,7 +94,10 @@ def dashboard(settings: Settings) -> int:
     output = settings.data_dir / "charts" / f"dashboard-{now_local:%Y%m%d-%H%M}.png"
     generated = generate_dashboard(store, output, now_local)
     if generated:
-        notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M}")
+        signature = hashlib.sha256(generated.read_bytes()).hexdigest()
+        if signature != store.get_meta("last_national_chart_signature"):
+            notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M}")
+            store.set_meta("last_national_chart_signature", signature)
     market = generate_openbb_market_chart(settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png")
     if market:
         signature = hashlib.sha256(market.read_bytes()).hexdigest()
