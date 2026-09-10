@@ -92,6 +92,33 @@ def extract_fuel_prices(
     period = extract_effective_period(compact, reference)
     found: dict[str, Decimal] = {}
 
+    # Petroecuador's monthly structure PDF contains many sectors. Only the
+    # AUTOMOTRIZ rows are relevant here, and these are terminal—not pump—prices.
+    # Keeping them under explicit product names prevents accidental publication
+    # as consumer retail prices.
+    if "precio en terminal" in normalized:
+        terminal_patterns = {
+            "Extra (terminal automotriz)": r"gasolina extra automotriz\s+galones?\s*\$?\s*(\d{1,2}(?:[.,]\d{1,6})?)",
+            "Ecopaís (terminal automotriz)": r"gasolina extra con etanol automotriz\s+galones?\s*\$?\s*(\d{1,2}(?:[.,]\d{1,6})?)",
+            "Diésel Premium (terminal automotriz)": r"diesel premium\s*\(automotriz\)\s+galones?\s*\$?\s*(\d{1,2}(?:[.,]\d{1,6})?)",
+            "Súper 95 (terminal automotriz)": r"gasolina super premium 95 automotriz\s+galones?\s*\$?\s*(\d{1,2}(?:[.,]\d{1,6})?)",
+        }
+        for product, product_pattern in terminal_patterns.items():
+            match = re.search(product_pattern, normalized)
+            value = _decimal(match.group(1)) if match else None
+            if value is not None and validate_price(value)[0]:
+                found[product] = value
+        return [
+            FuelPrice(
+                product=product,
+                price=value,
+                period=period,
+                source_url=source_url,
+                observed_at=observed_at,
+            )
+            for product, value in sorted(found.items())
+        ]
+
     shared = re.finditer(
         r"(?:gasolina\s+)?(extra)\s*/\s*(ecopais)\s*(?:[:=]|usd|\$)?\s*\$?\s*(\d{1,2}(?:[.,]\d{1,4})?)",
         normalized,
