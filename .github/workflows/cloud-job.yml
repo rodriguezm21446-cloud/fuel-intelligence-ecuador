@@ -107,7 +107,7 @@ jobs:
               "Prueba técnica de Gemini para Fuel Intelligence Ecuador.",
           )
           if result is None:
-              raise SystemExit("Gemini no confirmó una respuesta estructurada")
+              raise SystemExit(f"Gemini no confirmó una respuesta: {editor.last_error}")
           print("Gemini respondió correctamente; texto para X dentro del límite:", len(result.x_text))
           PY
 
