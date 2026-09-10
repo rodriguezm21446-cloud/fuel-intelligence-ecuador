@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from fuelintel.charts import HEIGHT, WIDTH, choose_chart_kind, generate_dashboard
+from fuelintel.charts import HEIGHT, WIDTH, choose_chart_kind, generate_dashboard, own_data_label
 from fuelintel.models import EffectivePeriod, FuelPrice
 from fuelintel.openbb_chart import _weekly_closes
 from fuelintel.storage import Store
@@ -21,6 +21,11 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(choose_chart_kind("market_price", 50, has_ohlc=False), "line")
         self.assertEqual(choose_chart_kind("comparison", 4), "bar")
         self.assertEqual(choose_chart_kind("market_price", 1), "card")
+
+    def test_estimate_is_never_labeled_as_official(self):
+        label = own_data_label(estimated=True)
+        self.assertIn("ESTIMACIÓN PROPIA", label)
+        self.assertIn("NO ES DATO OFICIAL", label)
 
     def test_weekly_chart_uses_last_real_close_without_smoothing(self):
         rows = [
