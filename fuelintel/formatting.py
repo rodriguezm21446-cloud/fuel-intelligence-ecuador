@@ -33,11 +33,12 @@ def format_price_alert(
     editorial: Editorial | None = None,
 ) -> str:
     period = prices[0].period if prices else None
-    lines = ["CONFIRMADO — PRECIOS DE COMBUSTIBLES"]
+    terminal = any("terminal automotriz" in item.product.lower() for item in prices)
+    lines = ["CONFIRMADO — ACTUALIZACIÓN DE COMBUSTIBLES | ECUADOR"]
     if period:
         lines.append(f"Vigencia: {period.start:%d/%m/%Y} al {period.end:%d/%m/%Y}")
     lines.append(f"Detectado: {detected_local:%d/%m/%Y %H:%M:%S}")
-    lines.append("")
+    lines.extend(["", "PRECIOS VIGENTES EN TERMINAL:" if terminal else "PRECIOS VIGENTES AL CONSUMIDOR:"])
     for item in prices:
         change = changes[item.product]
         if change.absolute is None:
@@ -45,7 +46,16 @@ def format_price_alert(
         else:
             sign = "+" if change.absolute > 0 else ""
             delta = f"{sign}${change.absolute} ({sign}{change.percent}%) — {direction(change)}"
-        lines.append(f"{item.product}: ${_price(item.price)} por galón | {delta}")
+        lines.append(f"{item.product}: ${_price(item.price)} por galón")
+    lines.extend(["", "VARIACIÓN FRENTE AL PERIODO ANTERIOR:"])
+    for item in prices:
+        change = changes[item.product]
+        if change.absolute is None:
+            delta = "sin historial comparable"
+        else:
+            sign = "+" if change.absolute > 0 else ""
+            delta = f"{sign}${change.absolute} ({sign}{change.percent}%) — {direction(change)}"
+        lines.append(f"{item.product}: {delta}")
     analysis = editorial.analysis if editorial else (
         "Python verificó rangos, unidades, vigencia y variaciones con aritmética decimal. "
         "Los factores causales solo se añadirán cuando estén respaldados por fuentes."
@@ -54,7 +64,9 @@ def format_price_alert(
     lines.extend(
         [
             "",
-            f"Análisis: {analysis}",
+            "",
+            "POR QUÉ CAMBIÓ:",
+            analysis,
             *((f"Dudas declaradas: {editorial.doubts}",) if editorial and editorial.doubts else ()),
             "",
             "TEXTO PARA X:",
