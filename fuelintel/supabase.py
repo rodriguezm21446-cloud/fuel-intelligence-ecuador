@@ -9,6 +9,7 @@ from .storage import Store
 TABLES = {
     "items": "fuelintel_items",
     "prices": "fuelintel_prices",
+    "metrics": "fuelintel_price_metrics",
 }
 
 
@@ -42,7 +43,7 @@ class SupabaseMirror:
         if not self.enabled:
             return 0
         pending = store.pending_sync(limit)
-        grouped: dict[str, list] = {"items": [], "prices": []}
+        grouped: dict[str, list] = {"items": [], "prices": [], "metrics": []}
         for row in pending:
             if row["entity_type"] in grouped:
                 grouped[row["entity_type"]].append(row)
