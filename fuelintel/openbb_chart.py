@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from .charts import AMBER, BG, BLUE, GREEN, GRID, MUTED, PANEL, RED, WHITE, _text
+from .charts import AMBER, BG, BLUE, GREEN, GRID, MUTED, PANEL, RED, WHITE, _text, choose_chart_kind
 
 
 def stochastic_rsi(values: list[float], length: int = 14) -> list[float | None]:
@@ -60,7 +60,7 @@ def generate_openbb_market_chart(destination: Path) -> Path | None:
     image = Image.new("RGB", (1600, 900), BG)
     draw = ImageDraw.Draw(image)
     _text(draw, (55, 30), "PETRÓLEO: WTI Y BRENT", 31, WHITE, True)
-    _text(draw, (55, 73), "Evolución de los precios de referencia durante los últimos seis meses", 15, MUTED)
+    _text(draw, (55, 73), "Cierres diarios de los dos crudos de referencia · últimos seis meses", 15, MUTED)
     left, right, top, bottom = 80, 1515, 190, 680
     draw.rectangle((left, top, right, bottom), fill=PANEL, outline=GRID)
     values = [v for rows in series.values() for _, v in rows]
@@ -74,7 +74,10 @@ def generate_openbb_market_chart(destination: Path) -> Path | None:
     for index, (name, rows) in enumerate(series.items()):
         color = AMBER if name == "WTI" else BLUE
         points = [(left + i * (right - left) / max(max_len - 1, 1), bottom - (v - low) / span * (bottom - top)) for i, (_, v) in enumerate(rows)]
-        draw.line(points, fill=color, width=3)
+        # OpenBB returns daily closing prices here. A line is truthful; candles
+        # would require verified open/high/low/close fields and are not fabricated.
+        if choose_chart_kind("market_price", len(points), has_ohlc=False) == "line":
+            draw.line(points, fill=color, width=4)
         daily = rows[-1][1] - rows[-2][1]
         sign = "+" if daily > 0 else ""
         daily_color = GREEN if daily > 0 else RED if daily < 0 else MUTED
@@ -101,10 +104,10 @@ def generate_openbb_market_chart(destination: Path) -> Path | None:
     if "WTI" in series and "BRENT" in series:
         spread = series["BRENT"][-1][1] - series["WTI"][-1][1]
         spread_text = f"Diferencia Brent–WTI: ${spread:+.2f} por barril"
-    _text(draw, (80, 755), "LECTURA RÁPIDA", 14, AMBER, True)
+    _text(draw, (80, 755), "QUÉ MUESTRA", 14, AMBER, True)
     _text(draw, (80, 787), spread_text or "Solo hay una referencia disponible; no se calcula diferencia.", 17, WHITE, True)
     _text(draw, (80, 825), stats, 12, WHITE)
-    _text(draw, (80, 864), f"Fuente: OpenBB Platform / Yahoo Finance · Cierres diarios · Periodo: {first} a {last} · USD por barril", 11, MUTED)
+    _text(draw, (80, 864), f"Fuente: OpenBB Platform / Yahoo Finance · Cierres diarios · {first} a {last} · USD por barril · No son precios de gasolina", 11, MUTED)
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination, "PNG", optimize=True)
     return destination
