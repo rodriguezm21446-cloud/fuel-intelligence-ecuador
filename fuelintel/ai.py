@@ -20,8 +20,8 @@ class GeminiEditor:
 
     def __init__(self, api_key: str, model: str, timeout_seconds: int = 30):
         self.api_key = api_key.strip()
-        selected = model.strip() or "gemini-2.5-flash-lite"
-        self.model = selected if selected.replace("-", "").replace(".", "").isalnum() else "gemini-2.5-flash-lite"
+        selected = model.strip() or "gemini-3.5-flash-lite"
+        self.model = selected if selected.replace("-", "").replace(".", "").isalnum() else "gemini-3.5-flash-lite"
         self.timeout_seconds = timeout_seconds
         self.last_error = ""
 
