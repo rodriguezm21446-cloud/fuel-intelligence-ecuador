@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from .calculations import validate_price
-from .models import EffectivePeriod, FuelPrice
+from .models import EffectivePeriod, FuelPrice, PriceType
 from .text import collapse_spaces, fold
 
 
@@ -37,6 +37,23 @@ PRODUCT_ALIASES = {
     "diesel": "Diésel Premium",
     "diesel premium": "Diésel Premium",
 }
+
+
+def source_name_from_url(url: str) -> str:
+    value = fold(url)
+    if "controlhidrocarburos" in value or "arch" in value:
+        return "ARCH"
+    if "petroecuador" in value:
+        return "Petroecuador"
+    return ""
+
+
+def extract_decree_resolution(text: str) -> str:
+    match = re.search(
+        r"\b(decreto|resolucion)\s+(?:ejecutiv[oa]\s+)?(?:n(?:ro|o)?\.?\s*)?([a-z0-9-]{2,30})",
+        fold(text),
+    )
+    return f"{match.group(1).title()} {match.group(2).upper()}" if match else ""
 
 
 def _safe_date(year: int, month_name: str, day: int) -> date | None:
@@ -91,6 +108,8 @@ def extract_fuel_prices(
     normalized = fold(compact)
     period = extract_effective_period(compact, reference)
     found: dict[str, Decimal] = {}
+    source_name = source_name_from_url(source_url)
+    decree_resolution = extract_decree_resolution(compact)
 
     # Petroecuador's monthly structure PDF contains many sectors. Only the
     # AUTOMOTRIZ rows are relevant here, and these are terminal—not pump—prices.
@@ -115,6 +134,10 @@ def extract_fuel_prices(
                 period=period,
                 source_url=source_url,
                 observed_at=observed_at,
+                verified_at=observed_at,
+                price_type=PriceType.TERMINAL,
+                source_name=source_name,
+                decree_resolution=decree_resolution,
             )
             for product, value in sorted(found.items())
         ]
@@ -130,14 +153,18 @@ def extract_fuel_prices(
             found["Ecopaís"] = value
 
     aliases = "|".join(sorted((re.escape(item) for item in PRODUCT_ALIASES), key=len, reverse=True))
+    product_types: dict[str, PriceType] = {name: PriceType.PUBLICO for name in found}
     pattern = re.compile(
-        rf"\b(?P<product>{aliases})\b(?:\s+(?:referencial|automotriz))?\s*(?:[:=]|usd|\$)?\s*\$?\s*(?P<price>\d{{1,2}}(?:[.,]\d{{1,4}})?)"
+        rf"\b(?P<product>{aliases})\b(?:\s+(?P<kind>referencial|automotriz))?\s*(?:[:=]|usd|\$)?\s*\$?\s*(?P<price>\d{{1,2}}(?:[.,]\d{{1,4}})?)"
     )
     for match in pattern.finditer(normalized):
         value = _decimal(match.group("price"))
         product = PRODUCT_ALIASES[match.group("product")]
         if value is not None and validate_price(value)[0]:
             found[product] = value
+            product_types[product] = (
+                PriceType.REFERENCIAL if match.group("kind") == "referencial" else PriceType.PUBLICO
+            )
 
     return [
         FuelPrice(
@@ -146,6 +173,10 @@ def extract_fuel_prices(
             period=period,
             source_url=source_url,
             observed_at=observed_at,
+            verified_at=observed_at,
+            price_type=product_types.get(product, PriceType.UNKNOWN),
+            source_name=source_name,
+            decree_resolution=decree_resolution,
         )
         for product, value in sorted(found.items())
     ]
