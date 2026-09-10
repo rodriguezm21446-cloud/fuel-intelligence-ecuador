@@ -15,6 +15,13 @@ class VerificationStatus(StrEnum):
     DUPLICATE = "duplicate"
 
 
+class PriceType(StrEnum):
+    PUBLICO = "PUBLICO"
+    TERMINAL = "TERMINAL"
+    REFERENCIAL = "REFERENCIAL"
+    UNKNOWN = "UNKNOWN"
+
+
 @dataclass(frozen=True, slots=True)
 class SourceSpec:
     id: str
@@ -73,6 +80,12 @@ class FuelPrice:
     period: EffectivePeriod | None = None
     source_url: str = ""
     observed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    verified_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    price_type: PriceType = PriceType.UNKNOWN
+    source_name: str = ""
+    decree_resolution: str = ""
+    source_conflict: bool = False
+    verification_status: str = "CONFIRMED"
 
 
 @dataclass(frozen=True, slots=True)
