@@ -3,19 +3,19 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from fuelintel.ai import DeepSeekEditor
+from fuelintel.ai import GeminiEditor
 
 
-class DeepSeekTests(unittest.TestCase):
+class GeminiTests(unittest.TestCase):
     def test_is_disabled_without_secret(self):
-        editor = DeepSeekEditor("", "deepseek-v4-flash")
+        editor = GeminiEditor("", "gemini-2.5-flash-lite")
         self.assertFalse(editor.enabled)
         self.assertIsNone(editor.review("evidence", "safe draft"))
 
     @patch("fuelintel.ai.urllib.request.urlopen")
     def test_timeout_falls_back_without_blocking(self, mocked):
         mocked.side_effect = TimeoutError()
-        editor = DeepSeekEditor("secret", "deepseek-v4-flash")
+        editor = GeminiEditor("secret", "gemini-2.5-flash-lite")
         self.assertIsNone(editor.review("evidence", "safe draft"))
 
 
