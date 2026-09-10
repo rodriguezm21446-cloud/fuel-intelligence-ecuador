@@ -62,6 +62,19 @@
     "max_age_hours": 744
   },
   {
+    "id": "petroecuador-historico",
+    "name": "EP Petroecuador - Histórico mensual de precios en terminal",
+    "url": "https://www.eppetroecuador.ec/?p=20421",
+    "kind": "html_links",
+    "trust": 100,
+    "country": "EC",
+    "critical": true,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 300,
+    "burst_days": [8, 9, 10, 11, 12],
+    "max_age_hours": 744
+  },
+  {
     "id": "eluniverso-economia-rss",
     "name": "El Universo - Economía RSS",
     "url": "https://www.eluniverso.com/arc/outboundfeeds/rss-subsection/noticias/economia?outputType=xml",
