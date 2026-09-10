@@ -45,8 +45,8 @@ class Settings:
     telegram_chat_id: str
     supabase_url: str
     supabase_service_key: str
-    deepseek_api_key: str
-    deepseek_model: str
+    gemini_api_key: str
+    gemini_model: str
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -70,8 +70,8 @@ class Settings:
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
             supabase_url=os.getenv("SUPABASE_URL", "").rstrip("/"),
             supabase_service_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
-            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
         )
 
     def validate_activation(self) -> None:
