@@ -10,6 +10,8 @@ requires-python = ">=3.11"
 dependencies = [
   "pillow>=10,<13",
   "pypdf>=5,<7",
+  "openbb>=4.7,<5",
+  "openbb-yfinance>=1.6,<2",
 ]
 
 [project.optional-dependencies]
@@ -24,3 +26,4 @@ include = ["fuelintel*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
