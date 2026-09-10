@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from .text import collapse_spaces, trim_x
 
 
+EDITORIAL_GUARDRAILS = (
+    "No presentes correlación como causalidad. Una variación de WTI o Brent no demuestra por sí sola "
+    "que cambiará el precio al consumidor en Ecuador. Solo afirma una subida, bajada o causa nacional "
+    "cuando la evidencia incluya el documento oficial aplicable. Separa hechos, cálculos propios y contexto."
+)
+
+
 @dataclass(frozen=True, slots=True)
 class Editorial:
     analysis: str
@@ -38,7 +45,7 @@ class GeminiEditor:
             "Eres editor de inteligencia de combustibles de Ecuador. Usa únicamente la evidencia. "
             "No inventes cifras, fechas, causas, predicciones ni fuentes. Declara contradicciones o "
             "documentos oficiales pendientes. Escribe sin emojis. El análisis tendrá máximo 700 "
-            "caracteres y el texto para X máximo 280.\n\n"
+            f"caracteres y el texto para X máximo 280. {EDITORIAL_GUARDRAILS}\n\n"
             f"EVIDENCIA VERIFICADA:\n{evidence[:12000]}\n\n"
             f"BORRADOR SEGURO PARA X:\n{fallback_x}\n\n"
             "Conserva exactamente las cifras comprobadas."
