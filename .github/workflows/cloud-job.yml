@@ -57,7 +57,7 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: gemini-3.5-flash-lite
-      FUELINTEL_AI_REVISION: "6"
+      FUELINTEL_AI_REVISION: "7"
       FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
       FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
       FUELINTEL_EVENT_TITLE: ${{ inputs.event_title }}
@@ -127,7 +127,7 @@ jobs:
               raise SystemExit("OpenBB no entregó una serie verificable")
           sent = TelegramNotifier(
               os.environ["TELEGRAM_BOT_TOKEN"], os.environ["TELEGRAM_CHAT_ID"], True, False
-          ).send_photo(chart, "PRUEBA — OpenBB: WTI, Brent y Stoch RSI. Datos y fuentes al pie.")
+          ).send_photo(chart, "PRUEBA — Petróleo WTI y Brent. Precios, variaciones, fechas y fuentes verificadas.")
           if not sent:
               raise SystemExit("Telegram no confirmó el gráfico OpenBB")
           PY
