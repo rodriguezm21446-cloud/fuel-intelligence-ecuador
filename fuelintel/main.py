@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 from .ai import GeminiEditor
-from .charts import generate_dashboard
+from .charts import generate_dashboard, generate_historical_dashboard
 from .openbb_chart import generate_openbb_market_chart
 from .config import Settings, load_sources
 from .pipeline import Pipeline
@@ -37,7 +37,14 @@ def build_runtime(settings: Settings):
         settings.dry_run,
     )
     editor = GeminiEditor(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds)
-    pipeline = Pipeline(store, poller, notifier, settings.timezone, editor=editor)
+    pipeline = Pipeline(
+        store,
+        poller,
+        notifier,
+        settings.timezone,
+        editor=editor,
+        chart_generator=generate_dashboard,
+    )
     return store, poller, notifier, pipeline
 
 
@@ -92,13 +99,23 @@ def dashboard(settings: Settings) -> int:
     store, _, notifier, _ = build_runtime(settings)
     now_local = datetime.now(timezone.utc).astimezone(settings.timezone)
     output = settings.data_dir / "charts" / f"dashboard-{now_local:%Y%m%d-%H%M}.png"
-    generated = generate_dashboard(store, output, now_local)
+    try:
+        generated = generate_dashboard(store, output, now_local)
+    except Exception as error:
+        store.record_chart_error("WF_06_CHART_GENERATOR", f"nacional: {type(error).__name__}: {error}")
+        LOG.exception("WF_08_ERROR_MONITOR registró el fallo del gráfico nacional")
+        generated = None
     if generated:
         signature = hashlib.sha256(generated.read_bytes()).hexdigest()
         if signature != store.get_meta("last_national_chart_signature"):
             notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M}")
             store.set_meta("last_national_chart_signature", signature)
-    market = generate_openbb_market_chart(settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png")
+    try:
+        market = generate_openbb_market_chart(settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png")
+    except Exception as error:
+        store.record_chart_error("WF_06_CHART_GENERATOR", f"mercado: {type(error).__name__}: {error}")
+        LOG.exception("WF_08_ERROR_MONITOR registró el fallo del gráfico de mercado")
+        market = None
     if market:
         signature = hashlib.sha256(market.read_bytes()).hexdigest()
         if signature != store.get_meta("last_openbb_chart_signature"):
@@ -113,6 +130,24 @@ def dashboard(settings: Settings) -> int:
         return 2
     store.set_meta("last_dashboard_at", datetime.now(timezone.utc).isoformat())
     return 0
+
+
+def historical_dashboard(settings: Settings) -> int:
+    """Genera el histórico completo únicamente cuando el operador lo solicita."""
+    store, _, notifier, _ = build_runtime(settings)
+    now_local = datetime.now(timezone.utc).astimezone(settings.timezone)
+    output = settings.data_dir / "charts" / f"historico-{now_local:%Y%m%d-%H%M}.png"
+    try:
+        generated = generate_historical_dashboard(store, output)
+    except Exception as error:
+        store.record_chart_error("WF_06_CHART_GENERATOR", f"histórico: {type(error).__name__}: {error}")
+        LOG.exception("WF_08_ERROR_MONITOR registró el fallo del histórico")
+        return 2
+    if generated is None:
+        LOG.warning("no hay datos confirmados para el histórico")
+        return 2
+    store.record_pipeline_stage("WF_06_CHART_GENERATOR", "completed", str(generated))
+    return 0 if notifier.send_photo(generated, f"Histórico de combustibles · {now_local:%d/%m/%Y %H:%M}") else 1
 
 
 def health(settings: Settings) -> int:
@@ -211,6 +246,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--once", action="store_true", help="revisa todas las fuentes una sola vez")
     mode.add_argument("--dashboard", action="store_true", help="genera y envía el gráfico nacional")
+    mode.add_argument("--historical-dashboard", action="store_true", help="genera el histórico completo bajo demanda")
     mode.add_argument("--health", action="store_true", help="muestra salud y errores de fuentes")
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
@@ -227,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_once(settings)
     if args.dashboard:
         return dashboard(settings)
+    if args.historical_dashboard:
+        return historical_dashboard(settings)
     if args.health:
         return health(settings)
     return run_forever(settings)
