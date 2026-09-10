@@ -58,7 +58,8 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: gemini-3.5-flash-lite
       FUELINTEL_AI_REVISION: "7"
-      FUELINTEL_CHART_REVISION: "2"
+      FUELINTEL_CHART_REVISION: "3"
+      FUELINTEL_BRAND_NAME: "@PreciosCombustibleEC"
       FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
       FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
       FUELINTEL_EVENT_TITLE: ${{ inputs.event_title }}
@@ -84,6 +85,9 @@ jobs:
 
       - name: Install verified dependencies
         run: python -m pip install --disable-pip-version-check .
+
+      - name: Install Chromium for chart rendering
+        run: python -m playwright install --with-deps chromium
 
       - name: Validate calculations and chart rules
         if: github.event_name == 'push'
