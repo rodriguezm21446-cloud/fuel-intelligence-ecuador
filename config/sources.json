@@ -49,6 +49,19 @@
     "max_age_hours": 744
   },
   {
+    "id": "petroecuador-precios",
+    "name": "EP Petroecuador - Estructuras de precios",
+    "url": "https://www.eppetroecuador.ec/?s=estructura+de+precios",
+    "kind": "html_links",
+    "trust": 100,
+    "country": "EC",
+    "critical": true,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 300,
+    "burst_days": [8, 9, 10, 11, 12],
+    "max_age_hours": 744
+  },
+  {
     "id": "eluniverso-economia-rss",
     "name": "El Universo - Economía RSS",
     "url": "https://www.eluniverso.com/arc/outboundfeeds/rss-subsection/noticias/economia?outputType=xml",
@@ -73,6 +86,18 @@
     "max_age_hours": 36
   },
   {
+    "id": "ecuavisa-economia",
+    "name": "Ecuavisa - Economía",
+    "url": "https://www.ecuavisa.com/economia",
+    "kind": "html_links",
+    "trust": 75,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
     "id": "opec-press",
     "name": "OPEP - Comunicados",
     "url": "https://www.opec.org/",
@@ -85,3 +110,4 @@
     "max_age_hours": 72
   }
 ]
+
