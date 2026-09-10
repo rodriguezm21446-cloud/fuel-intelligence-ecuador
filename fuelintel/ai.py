@@ -23,13 +23,16 @@ class GeminiEditor:
         selected = model.strip() or "gemini-2.5-flash-lite"
         self.model = selected if selected.replace("-", "").replace(".", "").isalnum() else "gemini-2.5-flash-lite"
         self.timeout_seconds = timeout_seconds
+        self.last_error = ""
 
     @property
     def enabled(self) -> bool:
         return bool(self.api_key)
 
     def review(self, evidence: str, fallback_x: str) -> Editorial | None:
+        self.last_error = ""
         if not self.enabled:
+            self.last_error = "GEMINI_API_KEY no está configurada"
             return None
         prompt = (
             "Eres editor de inteligencia de combustibles de Ecuador. Usa únicamente la evidencia. "
@@ -78,6 +81,15 @@ class GeminiEditor:
             if not analysis or not x_text:
                 return None
             return Editorial(analysis, x_text, doubts)
-        except (KeyError, IndexError, TypeError, ValueError, TimeoutError, urllib.error.URLError):
+        except urllib.error.HTTPError as error:
+            try:
+                detail = json.loads(error.read().decode("utf-8", errors="replace"))
+                message = detail.get("error", {}).get("message", "respuesta rechazada")
+            except (TypeError, ValueError):
+                message = "respuesta rechazada"
+            self.last_error = f"HTTP {error.code}: {message}"[:500]
+            return None
+        except (KeyError, IndexError, TypeError, ValueError, TimeoutError, urllib.error.URLError) as error:
+            self.last_error = f"{type(error).__name__}: {error}"[:500]
             return None
 
