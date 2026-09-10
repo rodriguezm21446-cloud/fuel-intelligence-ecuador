@@ -58,6 +58,25 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(values["Diésel Premium"], Decimal("1.037"))
         self.assertEqual(values["Súper"], Decimal("2.98"))
 
+    def test_extracts_only_automotive_terminal_rows_from_official_pdf(self):
+        text = """
+        PERIODO DE VIGENCIA: DEL 12 DE AGOSTO AL 11 DE SEPTIEMBRE DE 2026
+        PRECIO EN TERMINAL (Incluye IVA)
+        GASOLINA EXTRA PETROLERO Galones $ 3,736914
+        DIESEL PREMIUM INDUSTRIAL Galones $ 4,707456
+        GASOLINA EXTRA AUTOMOTRIZ Galones $ 3,022927
+        GASOLINA EXTRA CON ETANOL AUTOMOTRIZ Galones $ 3,022927
+        DIESEL PREMIUM (AUTOMOTRIZ) Galones $ 3,032879
+        GASOLINA SUPER PREMIUM 95 AUTOMOTRIZ Galones $ 4,087589
+        """
+        prices = extract_fuel_prices(text, OFFICIAL.url, NOW, date(2026, 9, 8))
+        values = {item.product: item.price for item in prices}
+        self.assertEqual(values["Extra (terminal automotriz)"], Decimal("3.022927"))
+        self.assertEqual(values["Ecopaís (terminal automotriz)"], Decimal("3.022927"))
+        self.assertEqual(values["Diésel Premium (terminal automotriz)"], Decimal("3.032879"))
+        self.assertEqual(values["Súper 95 (terminal automotriz)"], Decimal("4.087589"))
+        self.assertNotIn("Extra", values)
+
 
 class VerificationTests(unittest.TestCase):
     def candidate(self, published_at=NOW):
@@ -229,3 +248,4 @@ class TelegramSetupTests(unittest.TestCase):
             latest_private_chat(updates),
             {"id": 123, "type": "private", "first_name": "Ana"},
         )
+
