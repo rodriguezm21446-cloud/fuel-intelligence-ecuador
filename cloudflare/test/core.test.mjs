@@ -4,12 +4,34 @@ import {
   canonicalUrl,
   extractRssCandidates,
   isRelevant,
+  isRelevantCandidate,
   titleOverlap
 } from "../src/core.js";
 
 test("detecta temas de combustible sin depender de acentos", () => {
   assert.equal(isRelevant("Nuevo precio del diésel en Ecuador"), true);
   assert.equal(isRelevant("Resultados del campeonato"), false);
+});
+
+test("acepta solo los PDF mensuales de precios del histórico de Petroecuador", () => {
+  assert.equal(
+    isRelevantCandidate(
+      "petroecuador-historico",
+      "Septiembre",
+      "",
+      "https://www.eppetroecuador.ec/wp-content/uploads/2026/09/ESTRUCTURA-DE-PRECIOS-SEPTIEMBRE-2026.pdf"
+    ),
+    true
+  );
+  assert.equal(
+    isRelevantCandidate(
+      "petroecuador-historico",
+      "Mapa",
+      "",
+      "https://www.eppetroecuador.ec/wp-content/uploads/2026/09/mapa.pdf"
+    ),
+    false
+  );
 });
 
 test("elimina rastreadores al normalizar URLs", () => {
@@ -35,3 +57,4 @@ test("mide coincidencia de titulares independientes", () => {
   assert.ok(titleOverlap("Gobierno anuncia cambio en precio de gasolina", "Nuevo precio de gasolina anunciado por el Gobierno") >= 0.5);
   assert.equal(titleOverlap("Precio de gasolina", "Partido de fútbol"), 0);
 });
+
