@@ -12,6 +12,7 @@ dependencies = [
   "pypdf>=5,<7",
   "openbb>=4.7,<5",
   "openbb-yfinance>=1.6,<2",
+  "tzdata>=2025.2",
 ]
 
 [project.optional-dependencies]
