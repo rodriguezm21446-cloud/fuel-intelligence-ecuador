@@ -45,6 +45,8 @@ class Settings:
     telegram_chat_id: str
     supabase_url: str
     supabase_service_key: str
+    deepseek_api_key: str
+    deepseek_model: str
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -68,6 +70,8 @@ class Settings:
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
             supabase_url=os.getenv("SUPABASE_URL", "").rstrip("/"),
             supabase_service_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
+            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
         )
 
     def validate_activation(self) -> None:
@@ -83,3 +87,4 @@ def load_sources(path: Path) -> list[SourceSpec]:
     if len(ids) != len(set(ids)):
         raise ValueError("Hay identificadores de fuentes duplicados")
     return [source for source in sources if source.enabled]
+
