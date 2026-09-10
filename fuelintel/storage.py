@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
+from decimal import Decimal
 
 from .models import Candidate, Decision, FuelPrice
 from .text import canonical_url, fold, title_similarity
@@ -43,9 +44,32 @@ CREATE TABLE IF NOT EXISTS fuel_prices (
     effective_to TEXT,
     source_url TEXT NOT NULL,
     observed_at TEXT NOT NULL,
+    verified_at TEXT,
+    price_type TEXT NOT NULL DEFAULT 'UNKNOWN',
+    source_name TEXT NOT NULL DEFAULT '',
+    decree_resolution TEXT NOT NULL DEFAULT '',
+    source_conflict INTEGER NOT NULL DEFAULT 0,
+    verification_status TEXT NOT NULL DEFAULT 'CONFIRMED',
     UNIQUE(product, price, effective_from, effective_to, source_url)
 );
 CREATE INDEX IF NOT EXISTS idx_prices_product_time ON fuel_prices(product, observed_at DESC);
+
+CREATE TABLE IF NOT EXISTS fuel_price_metrics (
+    product TEXT NOT NULL,
+    price_type TEXT NOT NULL,
+    historical_max TEXT NOT NULL,
+    historical_max_date TEXT NOT NULL,
+    historical_min TEXT NOT NULL,
+    historical_min_date TEXT NOT NULL,
+    latest_price TEXT NOT NULL,
+    latest_effective_from TEXT,
+    mom_absolute TEXT,
+    mom_percent TEXT,
+    yoy_absolute TEXT,
+    yoy_percent TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(product, price_type)
+);
 
 CREATE TABLE IF NOT EXISTS source_state (
     source_id TEXT PRIMARY KEY,
@@ -82,8 +106,25 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         with self.connect() as db:
-            db.executescript(SCHEMA)
             db.execute("PRAGMA journal_mode=WAL")
+            db.executescript(SCHEMA)
+            self._migrate_price_columns(db)
+
+    @staticmethod
+    def _migrate_price_columns(db: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(fuel_prices)")}
+        additions = {
+            "verified_at": "TEXT",
+            "price_type": "TEXT NOT NULL DEFAULT 'UNKNOWN'",
+            "source_name": "TEXT NOT NULL DEFAULT ''",
+            "decree_resolution": "TEXT NOT NULL DEFAULT ''",
+            "source_conflict": "INTEGER NOT NULL DEFAULT 0",
+            "verification_status": "TEXT NOT NULL DEFAULT 'CONFIRMED'",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE fuel_prices ADD COLUMN {name} {definition}")
+        db.execute("UPDATE fuel_prices SET verified_at = observed_at WHERE verified_at IS NULL")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -181,8 +222,9 @@ class Store:
                 """
                 INSERT OR IGNORE INTO fuel_prices (
                     product, price, currency, unit, effective_from, effective_to,
-                    source_url, observed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    source_url, observed_at, verified_at, price_type, source_name,
+                    decree_resolution, source_conflict, verification_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     price.product,
@@ -192,11 +234,18 @@ class Store:
                     price.period.start.isoformat() if price.period else None,
                     price.period.end.isoformat() if price.period else None,
                     canonical_url(price.source_url),
+                    price.verified_at.isoformat(),
                     price.observed_at.isoformat(),
+                    price.price_type.value,
+                    price.source_name,
+                    price.decree_resolution,
+                    int(price.source_conflict),
+                    price.verification_status,
                 ),
             )
             inserted = cursor.rowcount > 0
             if inserted:
+                self._refresh_price_metrics(db, price.product, price.price_type.value)
                 effective_from = price.period.start.isoformat() if price.period else None
                 effective_to = price.period.end.isoformat() if price.period else None
                 payload = {
@@ -208,17 +257,123 @@ class Store:
                     "effective_to": effective_to,
                     "source_url": canonical_url(price.source_url),
                     "observed_at": price.observed_at.isoformat(),
+                    "verified_at": price.verified_at.isoformat(),
+                    "price_type": price.price_type.value,
+                    "source_name": price.source_name,
+                    "decree_resolution": price.decree_resolution or None,
+                    "source_conflict": price.source_conflict,
+                    "verification_status": price.verification_status,
                 }
                 key = "|".join([price.product, str(price.price), effective_from or "", effective_to or "", canonical_url(price.source_url)])
                 self._enqueue(db, "prices", key, payload)
             return inserted
 
     @staticmethod
+    def _change(current: Decimal, previous: Decimal | None) -> tuple[str | None, str | None]:
+        if previous is None:
+            return None, None
+        absolute = current - previous
+        percent = None if previous == 0 else absolute / previous * Decimal("100")
+        return str(absolute.quantize(Decimal("0.001"))), str(percent.quantize(Decimal("0.01"))) if percent is not None else None
+
+    def _refresh_price_metrics(self, db: sqlite3.Connection, product: str, price_type: str) -> None:
+        rows = db.execute(
+            """
+            SELECT price, effective_from, observed_at FROM fuel_prices
+            WHERE product = ? AND price_type = ? AND source_conflict = 0
+              AND verification_status = 'CONFIRMED'
+            ORDER BY COALESCE(effective_from, observed_at), verified_at
+            """,
+            (product, price_type),
+        ).fetchall()
+        if not rows:
+            db.execute("DELETE FROM fuel_price_metrics WHERE product = ? AND price_type = ?", (product, price_type))
+            return
+        latest = rows[-1]
+        current = Decimal(latest["price"])
+        previous = Decimal(rows[-2]["price"]) if len(rows) > 1 else None
+        mom_absolute, mom_percent = self._change(current, previous)
+        latest_date = latest["effective_from"] or latest["observed_at"][:10]
+        latest_period = date.fromisoformat(latest_date)
+        target_year = latest_period.year - 1
+        yoy_row = next(
+            (
+                row
+                for row in reversed(rows[:-1])
+                if (comparison_date := date.fromisoformat(row["effective_from"] or row["observed_at"][:10])).year
+                == target_year
+                and comparison_date.month == latest_period.month
+            ),
+            None,
+        )
+        yoy_absolute, yoy_percent = self._change(current, Decimal(yoy_row["price"]) if yoy_row else None)
+        maximum = max(rows, key=lambda row: Decimal(row["price"]))
+        minimum = min(rows, key=lambda row: Decimal(row["price"]))
+        db.execute(
+            """
+            INSERT INTO fuel_price_metrics(
+                product, price_type, historical_max, historical_max_date,
+                historical_min, historical_min_date, latest_price, latest_effective_from,
+                mom_absolute, mom_percent, yoy_absolute, yoy_percent, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(product, price_type) DO UPDATE SET
+                historical_max=excluded.historical_max,
+                historical_max_date=excluded.historical_max_date,
+                historical_min=excluded.historical_min,
+                historical_min_date=excluded.historical_min_date,
+                latest_price=excluded.latest_price,
+                latest_effective_from=excluded.latest_effective_from,
+                mom_absolute=excluded.mom_absolute,
+                mom_percent=excluded.mom_percent,
+                yoy_absolute=excluded.yoy_absolute,
+                yoy_percent=excluded.yoy_percent,
+                updated_at=excluded.updated_at
+            """,
+            (
+                product,
+                price_type,
+                maximum["price"],
+                maximum["effective_from"] or maximum["observed_at"][:10],
+                minimum["price"],
+                minimum["effective_from"] or minimum["observed_at"][:10],
+                latest["price"],
+                latest["effective_from"],
+                mom_absolute,
+                mom_percent,
+                yoy_absolute,
+                yoy_percent,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        metric_payload = {
+            "product": product,
+            "price_type": price_type,
+            "historical_max": maximum["price"],
+            "historical_max_date": maximum["effective_from"] or maximum["observed_at"][:10],
+            "historical_min": minimum["price"],
+            "historical_min_date": minimum["effective_from"] or minimum["observed_at"][:10],
+            "latest_price": latest["price"],
+            "latest_effective_from": latest["effective_from"],
+            "mom_absolute": mom_absolute,
+            "mom_percent": mom_percent,
+            "yoy_absolute": yoy_absolute,
+            "yoy_percent": yoy_percent,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._enqueue(db, "metrics", f"{product}|{price_type}", metric_payload)
+
+    @staticmethod
     def _enqueue(db: sqlite3.Connection, entity_type: str, dedupe_key: str, payload: dict) -> None:
         db.execute(
             """
-            INSERT OR IGNORE INTO sync_outbox(entity_type, dedupe_key, payload_json, created_at)
+            INSERT INTO sync_outbox(entity_type, dedupe_key, payload_json, created_at)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT(entity_type, dedupe_key) DO UPDATE SET
+                payload_json=excluded.payload_json,
+                created_at=excluded.created_at,
+                attempts=0,
+                last_error=NULL,
+                synced_at=NULL
             """,
             (entity_type, dedupe_key, json.dumps(payload, ensure_ascii=False), datetime.now(timezone.utc).isoformat()),
         )
@@ -251,7 +406,7 @@ class Store:
             )
 
     def previous_price(self, product: str, exclude_period_start: str | None = None) -> str | None:
-        query = "SELECT price FROM fuel_prices WHERE product = ?"
+        query = "SELECT price FROM fuel_prices WHERE product = ? AND source_conflict = 0 AND verification_status = 'CONFIRMED'"
         values: list[str] = [product]
         if exclude_period_start:
             query += " AND (effective_from IS NULL OR effective_from != ?)"
@@ -268,10 +423,81 @@ class Store:
                 SELECT * FROM (
                     SELECT *, ROW_NUMBER() OVER (PARTITION BY product ORDER BY COALESCE(effective_from, observed_at) DESC) AS rn
                     FROM fuel_prices
+                    WHERE price_type != 'UNKNOWN' AND source_conflict = 0
                 ) WHERE rn <= ? ORDER BY product, COALESCE(effective_from, observed_at)
                 """,
                 (limit_per_product,),
             ).fetchall()
+
+    def price_conflict(self, price: FuelPrice) -> bool:
+        if not price.period or not price.source_name:
+            return False
+        with self.connect() as db:
+            row = db.execute(
+                """
+                SELECT 1 FROM fuel_prices
+                WHERE product = ? AND effective_from = ? AND price_type = ?
+                  AND source_name != '' AND source_name != ?
+                  AND ABS(CAST(price AS REAL) - CAST(? AS REAL)) > 0.0005
+                LIMIT 1
+                """,
+                (
+                    price.product,
+                    price.period.start.isoformat(),
+                    price.price_type.value,
+                    price.source_name,
+                    str(price.price),
+                ),
+            ).fetchone()
+        return row is not None
+
+    def mark_source_conflict(self, price: FuelPrice) -> None:
+        if not price.period:
+            return
+        with self.connect() as db:
+            db.execute(
+                """
+                UPDATE fuel_prices SET source_conflict = 1
+                WHERE product = ? AND effective_from = ? AND price_type = ?
+                """,
+                (price.product, price.period.start.isoformat(), price.price_type.value),
+            )
+            self._refresh_price_metrics(db, price.product, price.price_type.value)
+
+    def price_history(self, product: str, price_type: str) -> list[sqlite3.Row]:
+        with self.connect() as db:
+            return db.execute(
+                """
+                SELECT * FROM fuel_prices
+                WHERE product = ? AND price_type = ? AND source_conflict = 0
+                  AND verification_status = 'CONFIRMED'
+                ORDER BY COALESCE(effective_from, observed_at), verified_at
+                """,
+                (product, price_type),
+            ).fetchall()
+
+    def price_metrics(self) -> list[sqlite3.Row]:
+        with self.connect() as db:
+            return db.execute("SELECT * FROM fuel_price_metrics ORDER BY product, price_type").fetchall()
+
+    def record_chart_error(self, stage: str, error: str) -> None:
+        payload = json.dumps(
+            {"stage": stage, "error": error[:1000], "at": datetime.now(timezone.utc).isoformat()},
+            ensure_ascii=False,
+        )
+        self.set_meta("WF_08_ERROR_MONITOR", payload)
+
+    def record_pipeline_stage(self, stage: str, status: str, detail: str = "") -> None:
+        payload = json.dumps(
+            {
+                "stage": stage,
+                "status": status,
+                "detail": detail[:500],
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+            },
+            ensure_ascii=False,
+        )
+        self.set_meta(stage, payload)
 
     def source_state(self, source_id: str) -> dict[str, str | int | None]:
         with self.connect() as db:
@@ -326,3 +552,4 @@ class Store:
                 "INSERT INTO metadata(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
+
