@@ -27,6 +27,13 @@ export function isRelevant(title = "", summary = "") {
   return TOPIC_WORDS.some((word) => text.includes(word));
 }
 
+export function isRelevantCandidate(sourceId, title = "", summary = "", url = "") {
+  if (sourceId === "petroecuador-historico") {
+    return /\/ESTRUCTURA-DE-PRECIOS[^/]*\.pdf(?:$|\?)/i.test(url);
+  }
+  return isRelevant(title, summary);
+}
+
 export function canonicalUrl(value, base) {
   try {
     const url = new URL(value, base);
@@ -113,3 +120,4 @@ export async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", data);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
+
