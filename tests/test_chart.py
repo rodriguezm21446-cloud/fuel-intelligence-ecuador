@@ -10,6 +10,7 @@ from PIL import Image
 
 from fuelintel.charts import HEIGHT, WIDTH, choose_chart_kind, generate_dashboard
 from fuelintel.models import EffectivePeriod, FuelPrice
+from fuelintel.openbb_chart import _weekly_closes
 from fuelintel.storage import Store
 
 
@@ -20,6 +21,15 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(choose_chart_kind("market_price", 50, has_ohlc=False), "line")
         self.assertEqual(choose_chart_kind("comparison", 4), "bar")
         self.assertEqual(choose_chart_kind("market_price", 1), "card")
+
+    def test_weekly_chart_uses_last_real_close_without_smoothing(self):
+        rows = [
+            ("2026-08-03", 70.0),
+            ("2026-08-04", 71.0),
+            ("2026-08-07", 69.5),
+            ("2026-08-10", 72.0),
+        ]
+        self.assertEqual(_weekly_closes(rows), [("2026-08-07", 69.5), ("2026-08-10", 72.0)])
 
     def test_dashboard_is_a_valid_png(self):
         with tempfile.TemporaryDirectory() as folder:
