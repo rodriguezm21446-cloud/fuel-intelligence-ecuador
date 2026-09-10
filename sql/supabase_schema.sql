@@ -24,7 +24,38 @@ create table if not exists public.fuelintel_prices (
   effective_to date,
   source_url text not null,
   observed_at timestamptz not null,
+  verified_at timestamptz,
+  price_type text not null default 'UNKNOWN' check (price_type in ('PUBLICO', 'TERMINAL', 'REFERENCIAL', 'UNKNOWN')),
+  source_name text not null default '',
+  decree_resolution text,
+  source_conflict boolean not null default false,
+  verification_status text not null default 'CONFIRMED' check (verification_status in ('CONFIRMED', 'PENDING')),
   unique (product, price, effective_from, effective_to, source_url)
+);
+
+alter table public.fuelintel_prices add column if not exists verified_at timestamptz;
+alter table public.fuelintel_prices add column if not exists price_type text not null default 'UNKNOWN';
+alter table public.fuelintel_prices add column if not exists source_name text not null default '';
+alter table public.fuelintel_prices add column if not exists decree_resolution text;
+alter table public.fuelintel_prices add column if not exists source_conflict boolean not null default false;
+alter table public.fuelintel_prices add column if not exists verification_status text not null default 'CONFIRMED';
+update public.fuelintel_prices set verified_at = observed_at where verified_at is null;
+
+create table if not exists public.fuelintel_price_metrics (
+  product text not null,
+  price_type text not null,
+  historical_max numeric(12,4) not null,
+  historical_max_date date not null,
+  historical_min numeric(12,4) not null,
+  historical_min_date date not null,
+  latest_price numeric(12,4) not null,
+  latest_effective_from date,
+  mom_absolute numeric(12,4),
+  mom_percent numeric(12,2),
+  yoy_absolute numeric(12,4),
+  yoy_percent numeric(12,2),
+  updated_at timestamptz not null,
+  primary key (product, price_type)
 );
 
 create index if not exists fuelintel_items_detected_idx on public.fuelintel_items (detected_at desc);
@@ -32,6 +63,7 @@ create index if not exists fuelintel_prices_product_period_idx on public.fuelint
 
 alter table public.fuelintel_items enable row level security;
 alter table public.fuelintel_prices enable row level security;
+alter table public.fuelintel_price_metrics enable row level security;
 
 -- No se crean políticas públicas. El servidor usará una clave de servicio guardada
 -- únicamente en Oracle. El bot de Telegram nunca recibirá esta clave.
