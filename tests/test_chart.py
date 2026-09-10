@@ -8,12 +8,19 @@ from pathlib import Path
 
 from PIL import Image
 
-from fuelintel.charts import HEIGHT, WIDTH, generate_dashboard
+from fuelintel.charts import HEIGHT, WIDTH, choose_chart_kind, generate_dashboard
 from fuelintel.models import EffectivePeriod, FuelPrice
 from fuelintel.storage import Store
 
 
 class ChartTests(unittest.TestCase):
+    def test_chart_kind_is_selected_from_the_data(self):
+        self.assertEqual(choose_chart_kind("official_period_price", 5), "step")
+        self.assertEqual(choose_chart_kind("market_price", 50, has_ohlc=True), "candlestick")
+        self.assertEqual(choose_chart_kind("market_price", 50, has_ohlc=False), "line")
+        self.assertEqual(choose_chart_kind("comparison", 4), "bar")
+        self.assertEqual(choose_chart_kind("market_price", 1), "card")
+
     def test_dashboard_is_a_valid_png(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -35,3 +42,4 @@ class ChartTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
