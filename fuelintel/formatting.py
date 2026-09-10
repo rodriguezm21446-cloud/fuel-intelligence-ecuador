@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
+from .ai import Editorial
 from .calculations import direction
 from .models import Candidate, FuelPrice, PriceChange
 from .text import collapse_spaces, trim_x
@@ -29,6 +30,7 @@ def format_price_alert(
     prices: list[FuelPrice],
     changes: dict[str, PriceChange],
     detected_local: datetime,
+    editorial: Editorial | None = None,
 ) -> str:
     period = prices[0].period if prices else None
     lines = ["CONFIRMADO — PRECIOS DE COMBUSTIBLES"]
@@ -44,14 +46,19 @@ def format_price_alert(
             sign = "+" if change.absolute > 0 else ""
             delta = f"{sign}${change.absolute} ({sign}{change.percent}%) — {direction(change)}"
         lines.append(f"{item.product}: ${_price(item.price)} por galón | {delta}")
+    analysis = editorial.analysis if editorial else (
+        "Python verificó rangos, unidades, vigencia y variaciones con aritmética decimal. "
+        "Los factores causales solo se añadirán cuando estén respaldados por fuentes."
+    )
+    x_text = editorial.x_text if editorial else compose_x_prices(prices, changes)
     lines.extend(
         [
             "",
-            "Análisis: Python verificó rangos, unidades, vigencia y variaciones con aritmética decimal. "
-            "Los factores causales solo se añadirán cuando estén respaldados por fuentes.",
+            f"Análisis: {analysis}",
+            *((f"Dudas declaradas: {editorial.doubts}",) if editorial and editorial.doubts else ()),
             "",
             "TEXTO PARA X:",
-            compose_x_prices(prices, changes),
+            x_text,
             "",
             f"Fuente: {candidate.source.name}",
             candidate.url,
@@ -60,11 +67,12 @@ def format_price_alert(
     return "\n".join(lines)
 
 
-def format_news_alert(candidate: Candidate, detected_local: datetime, corroborated: bool) -> str:
+def format_news_alert(candidate: Candidate, detected_local: datetime, corroborated: bool, editorial: Editorial | None = None) -> str:
     excerpt = collapse_spaces(candidate.summary or candidate.body)
     excerpt = excerpt[:700].rstrip()
     confirmation = "fuente primaria" if candidate.source.trust >= 90 else "coincidencia entre fuentes independientes"
-    x_text = trim_x(f"{candidate.title}. {excerpt[:150]} Fuente: {candidate.source.name}", 280)
+    fallback_x = trim_x(f"{candidate.title}. {excerpt[:150]} Fuente: {candidate.source.name}", 280)
+    x_text = editorial.x_text if editorial else fallback_x
     return "\n".join(
         [
             "CONFIRMADO — NOTICIA DE COMBUSTIBLES",
@@ -73,6 +81,8 @@ def format_news_alert(candidate: Candidate, detected_local: datetime, corroborat
             "",
             candidate.title,
             excerpt or "La fuente no proporcionó un resumen; revisa el enlace original.",
+            *(("", f"ANÁLISIS: {editorial.analysis}") if editorial else ()),
+            *((f"Dudas declaradas: {editorial.doubts}",) if editorial and editorial.doubts else ()),
             "",
             "TEXTO PARA X:",
             x_text,
