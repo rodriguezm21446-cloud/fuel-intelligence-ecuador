@@ -57,7 +57,7 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: gemini-3.5-flash-lite
-      FUELINTEL_AI_REVISION: "3"
+      FUELINTEL_AI_REVISION: "4"
       FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
       FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
       FUELINTEL_EVENT_TITLE: ${{ inputs.event_title }}
@@ -102,6 +102,7 @@ jobs:
           editor = GeminiEditor(
               os.environ.get("GEMINI_API_KEY", ""),
               os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+              timeout_seconds=90,
           )
           result = editor.review(
               "Prueba técnica. Extra cuesta $3,21 por galón. No añadas información.",
