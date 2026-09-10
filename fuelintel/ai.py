@@ -18,7 +18,7 @@ class Editorial:
 class GeminiEditor:
     """Optional Gemini reviewer; discovery and verification stay deterministic."""
 
-    def __init__(self, api_key: str, model: str, timeout_seconds: int = 30):
+    def __init__(self, api_key: str, model: str, timeout_seconds: int = 60):
         self.api_key = api_key.strip()
         selected = model.strip() or "gemini-3.5-flash-lite"
         self.model = selected if selected.replace("-", "").replace(".", "").isalnum() else "gemini-3.5-flash-lite"
