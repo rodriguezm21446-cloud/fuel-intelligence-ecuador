@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from .charts import _text, choose_chart_kind
+from .charts import _text as _base_text, choose_chart_kind
 
 
 BG = "#07090d"
@@ -18,6 +18,10 @@ AMBER = "#ff9d00"
 BLUE = "#46a6ff"
 GREEN = "#19c37d"
 RED = "#ff5d68"
+
+
+def _text(draw, xy, value, size, color=INK, bold=False, anchor=None):
+    _base_text(draw, xy, value, size, color, bold, anchor, mono=True)
 
 
 def stochastic_rsi(values: list[float], length: int = 14) -> list[float | None]:
