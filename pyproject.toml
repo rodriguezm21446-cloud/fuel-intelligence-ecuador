@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Monitor verificable de combustibles para Ecuador con alertas privadas por Telegram."
 requires-python = ">=3.11"
 dependencies = [
-  "pillow>=10,<13",
+  "playwright>=1.52,<2",
   "pypdf>=5,<7",
   "openbb>=4.7,<5",
   "openbb-yfinance>=1.6,<2",
