@@ -34,6 +34,7 @@ PRODUCT_ALIASES = {
     "super": "Súper",
     "super premium": "Súper",
     "gasolina super": "Súper",
+    "premium": "Premium",
     "diesel": "Diésel Premium",
     "diesel premium": "Diésel Premium",
 }
@@ -50,10 +51,14 @@ def source_name_from_url(url: str) -> str:
 
 def extract_decree_resolution(text: str) -> str:
     match = re.search(
-        r"\b(decreto|resolucion)\s+(?:ejecutiv[oa]\s+)?(?:n(?:ro|o)?\.?\s*)?([a-z0-9-]{2,30})",
+        r"\b(decreto|resolucion)\s+(?:ejecutiv[oa]\s+)?(?:n(?:ro|o)?\.?\s*)?([a-z0-9-]{2,30})"
+        r"(?:\s*[:,-]\s*([^.;\n]{3,80}))?",
         fold(text),
     )
-    return f"{match.group(1).title()} {match.group(2).upper()}" if match else ""
+    if not match:
+        return ""
+    reason = f": {collapse_spaces(match.group(3))}" if match.group(3) else ""
+    return f"{match.group(1).title()} {match.group(2).upper()}{reason}"[:120]
 
 
 def _safe_date(year: int, month_name: str, day: int) -> date | None:
