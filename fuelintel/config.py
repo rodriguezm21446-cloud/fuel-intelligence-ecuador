@@ -71,7 +71,7 @@ class Settings:
             supabase_url=os.getenv("SUPABASE_URL", "").rstrip("/"),
             supabase_service_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
         )
 
     def validate_activation(self) -> None:
