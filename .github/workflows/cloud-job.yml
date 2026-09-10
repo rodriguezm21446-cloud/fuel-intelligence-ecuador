@@ -84,6 +84,10 @@ jobs:
       - name: Install verified dependencies
         run: python -m pip install --disable-pip-version-check .
 
+      - name: Validate calculations and chart rules
+        if: github.event_name == 'push'
+        run: python -m unittest discover -s tests -v
+
       - name: Analyze detected event
         if: github.event_name == 'workflow_dispatch'
         run: python -m fuelintel.cloud_job
@@ -127,31 +131,9 @@ jobs:
               raise SystemExit("OpenBB no entregó una serie verificable")
           sent = TelegramNotifier(
               os.environ["TELEGRAM_BOT_TOKEN"], os.environ["TELEGRAM_CHAT_ID"], True, False
-          ).send_photo(chart, "PRUEBA — Petróleo WTI y Brent. Precios, variaciones, fechas y fuentes verificadas.")
+          ).send_photo(chart, "PRUEBA VISUAL — WTI y Brent. Diseño editorial generado con Python y datos obtenidos mediante OpenBB.")
           if not sent:
               raise SystemExit("Telegram no confirmó el gráfico OpenBB")
-          PY
-
-      - name: Verify Telegram connection
-        if: github.event_name == 'push'
-        run: |
-          python - <<'PY'
-          import os
-          from fuelintel.telegram import TelegramNotifier
-
-          notifier = TelegramNotifier(
-              os.environ["TELEGRAM_BOT_TOKEN"],
-              os.environ["TELEGRAM_CHAT_ID"],
-              enabled=True,
-              dry_run=False,
-          )
-          sent = notifier.send_text(
-              "PRUEBA TÉCNICA — Fuel Intelligence Ecuador\n"
-              "GitHub Actions, Python, Gemini y Telegram quedaron conectados. "
-              "Este mensaje no es una noticia."
-          )
-          if not sent:
-              raise SystemExit("Telegram no confirmó el envío")
           PY
 
       - name: Save analysis memory
