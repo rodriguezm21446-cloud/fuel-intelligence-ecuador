@@ -38,7 +38,8 @@ class Pipeline:
         corroborated_by: str = "",
     ) -> ProcessResult:
         initial_score = relevance_score(candidate)
-        if allow_notify and initial_score >= 5 and candidate.raw_kind in {"link", "rss"}:
+        must_follow_official_price_pdf = candidate.source.id == "petroecuador-historico"
+        if allow_notify and (initial_score >= 5 or must_follow_official_price_pdf) and candidate.raw_kind in {"link", "rss"}:
             candidate = self.poller.enrich(candidate)
 
         local_now = candidate.detected_at.astimezone(self.timezone)
