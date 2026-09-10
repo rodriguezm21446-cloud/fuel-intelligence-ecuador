@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from .charts import _text as _base_text, choose_chart_kind
+from .charts import _text as _base_text, choose_chart_kind, own_data_label
 
 
 BG = "#07090d"
@@ -112,7 +112,7 @@ def generate_openbb_market_chart(destination: Path) -> Path | None:
         draw.line((left, y, right, y), fill=GRID)
         _text(draw, (left - 14, y), f"${high - span * step / 5:.0f}", 11, MUTED, True, "rm")
     for index, (name, rows) in enumerate(series.items()):
-        color = AMBER if name == "WTI" else BLUE
+        color = AMBER if name == "WTI" else INK
         points = [(x_pos(day), y_pos(value)) for day, value in rows]
         if choose_chart_kind("market_price", len(points), has_ohlc=False) == "line":
             draw.line(points, fill=color, width=4, joint="curve")
@@ -144,8 +144,8 @@ def generate_openbb_market_chart(destination: Path) -> Path | None:
     _text(draw, (80, 735), "LECTURA CLAVE", 14, AMBER, True)
     _text(draw, (80, 770), spread_text or "Solo hay una referencia disponible; no se calcula diferencia.", 18, INK, True)
     _text(draw, (80, 810), stats, 12, INK)
-    _text(draw, (80, 852), "FUENTE: OPENBB PLATFORM · PROVEEDOR: YAHOO FINANCE", 13, INK, True)
-    _text(draw, (80, 878), f"Cierres semanales · Periodo {first} a {last} · USD por barril · No son precios de gasolina", 11, INK, True)
+    _text(draw, (80, 848), "FUENTE DE DATOS: OPENBB PLATFORM · PROVEEDOR: YAHOO FINANCE", 13, INK, True)
+    _text(draw, (80, 876), f"{own_data_label()} · CIERRES SEMANALES · {first} A {last} · USD/BARRIL", 11, INK, True)
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination, "PNG", optimize=True)
     return destination
