@@ -1,5 +1,8 @@
 .env
 .venv/
+.venv-chart/
+.playwright-browsers/
+*.egg-info/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -10,4 +13,6 @@ data/**/*.sqlite3
 data/*.sqlite3
 data/live-*/
 data/charts/dashboard-*.png
+data/chart-preview.png
 data/secrets/
+
