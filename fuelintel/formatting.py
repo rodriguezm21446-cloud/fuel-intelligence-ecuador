@@ -37,7 +37,7 @@ def format_price_alert(
     lines = ["CONFIRMADO — ACTUALIZACIÓN DE COMBUSTIBLES | ECUADOR"]
     if period:
         lines.append(f"Vigencia: {period.start:%d/%m/%Y} al {period.end:%d/%m/%Y}")
-    lines.append(f"Detectado: {detected_local:%d/%m/%Y %H:%M:%S}")
+    lines.append(f"Verificado: {detected_local:%d/%m/%Y %H:%M:%S} ECT")
     lines.extend(["", "PRECIOS VIGENTES EN TERMINAL:" if terminal else "PRECIOS VIGENTES AL CONSUMIDOR:"])
     for item in prices:
         lines.append(f"{item.product}: ${_price(item.price)} por galón")
