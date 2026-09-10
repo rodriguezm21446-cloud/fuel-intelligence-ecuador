@@ -102,6 +102,7 @@ const SOURCES = [
   { id: "presidencia-decretos", name: "Presidencia - Decretos", url: "https://minka.presidencia.gob.ec/", kind: "links", trust: 100 },
   { id: "bce-petroleo", name: "BCE - Estadísticas petroleras", url: "https://contenido.bce.fin.ec/?bcedata_grid_app=1", kind: "html", trust: 100 },
   { id: "petroecuador-precios", name: "EP Petroecuador - Estructuras de precios", url: "https://www.eppetroecuador.ec/?s=estructura+de+precios", kind: "links", trust: 100 },
+  { id: "petroecuador-historico", name: "EP Petroecuador - Histórico mensual de precios en terminal", url: "https://www.eppetroecuador.ec/?p=20421", kind: "links", trust: 100 },
   { id: "eluniverso-economia-rss", name: "El Universo - Economía", url: "https://www.eluniverso.com/arc/outboundfeeds/rss-subsection/noticias/economia?outputType=xml", kind: "rss", trust: 75 },
   { id: "primicias-economia", name: "Primicias - Economía", url: "https://www.primicias.ec/economia/", kind: "links", trust: 75 },
   { id: "ecuavisa-economia", name: "Ecuavisa - Economía", url: "https://www.ecuavisa.com/economia", kind: "links", trust: 75 },
