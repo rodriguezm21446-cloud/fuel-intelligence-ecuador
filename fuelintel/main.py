@@ -102,7 +102,7 @@ def dashboard(settings: Settings) -> int:
     if market:
         signature = hashlib.sha256(market.read_bytes()).hexdigest()
         if signature != store.get_meta("last_openbb_chart_signature"):
-            notifier.send_photo(market, f"OpenBB: Brent, WTI y Stoch RSI — {now_local:%d/%m/%Y %H:%M}")
+            notifier.send_photo(market, f"Mercado: petróleo Brent y WTI — {now_local:%d/%m/%Y %H:%M}")
             store.set_meta("last_openbb_chart_signature", signature)
         store.set_meta("last_openbb_chart_error", "")
     elif store.get_meta("last_openbb_chart_error") != "sin_datos":
