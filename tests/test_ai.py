@@ -8,14 +8,14 @@ from fuelintel.ai import GeminiEditor
 
 class GeminiTests(unittest.TestCase):
     def test_is_disabled_without_secret(self):
-        editor = GeminiEditor("", "gemini-2.5-flash-lite")
+        editor = GeminiEditor("", "gemini-3.5-flash-lite")
         self.assertFalse(editor.enabled)
         self.assertIsNone(editor.review("evidence", "safe draft"))
 
     @patch("fuelintel.ai.urllib.request.urlopen")
     def test_timeout_falls_back_without_blocking(self, mocked):
         mocked.side_effect = TimeoutError()
-        editor = GeminiEditor("secret", "gemini-2.5-flash-lite")
+        editor = GeminiEditor("secret", "gemini-3.5-flash-lite")
         self.assertIsNone(editor.review("evidence", "safe draft"))
 
 
