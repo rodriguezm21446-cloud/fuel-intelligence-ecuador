@@ -101,8 +101,10 @@ const SOURCES = [
   { id: "arch-biblioteca", name: "ARCH - Biblioteca y resoluciones", url: "https://controlhidrocarburos.gob.ec/biblioteca/", kind: "links", trust: 100 },
   { id: "presidencia-decretos", name: "Presidencia - Decretos", url: "https://minka.presidencia.gob.ec/", kind: "links", trust: 100 },
   { id: "bce-petroleo", name: "BCE - Estadísticas petroleras", url: "https://contenido.bce.fin.ec/?bcedata_grid_app=1", kind: "html", trust: 100 },
+  { id: "petroecuador-precios", name: "EP Petroecuador - Estructuras de precios", url: "https://www.eppetroecuador.ec/?s=estructura+de+precios", kind: "links", trust: 100 },
   { id: "eluniverso-economia-rss", name: "El Universo - Economía", url: "https://www.eluniverso.com/arc/outboundfeeds/rss-subsection/noticias/economia?outputType=xml", kind: "rss", trust: 75 },
   { id: "primicias-economia", name: "Primicias - Economía", url: "https://www.primicias.ec/economia/", kind: "links", trust: 75 },
+  { id: "ecuavisa-economia", name: "Ecuavisa - Economía", url: "https://www.ecuavisa.com/economia", kind: "links", trust: 75 },
   { id: "opec-press", name: "OPEP - Comunicados", url: "https://www.opec.org/", kind: "links", trust: 95 }
 ];
 
@@ -219,8 +221,7 @@ async function pollAll(env) {
   const detectedAt = new Date().toISOString();
   const states = await env.DB.prepare("SELECT * FROM source_state").all();
   const byId = new Map((states.results || []).map((state) => [state.source_id, state]));
-  await Promise.all(SOURCES.slice(0, 6).map((source) => pollSource(env, source, byId.get(source.id), detectedAt)));
-  await pollSource(env, SOURCES[6], byId.get(SOURCES[6].id), detectedAt);
+  await Promise.all(SOURCES.map((source) => pollSource(env, source, byId.get(source.id), detectedAt)));
 }
 
 export default {
@@ -251,3 +252,4 @@ export default {
     });
   }
 };
+
