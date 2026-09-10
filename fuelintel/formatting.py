@@ -40,12 +40,6 @@ def format_price_alert(
     lines.append(f"Detectado: {detected_local:%d/%m/%Y %H:%M:%S}")
     lines.extend(["", "PRECIOS VIGENTES EN TERMINAL:" if terminal else "PRECIOS VIGENTES AL CONSUMIDOR:"])
     for item in prices:
-        change = changes[item.product]
-        if change.absolute is None:
-            delta = "sin historial comparable"
-        else:
-            sign = "+" if change.absolute > 0 else ""
-            delta = f"{sign}${change.absolute} ({sign}{change.percent}%) — {direction(change)}"
         lines.append(f"{item.product}: ${_price(item.price)} por galón")
     lines.extend(["", "VARIACIÓN FRENTE AL PERIODO ANTERIOR:"])
     for item in prices:
