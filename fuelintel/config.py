@@ -60,7 +60,7 @@ class Settings:
             data_dir=Path(os.getenv("FUELINTEL_DATA_DIR", "./data")),
             sources_file=Path(os.getenv("FUELINTEL_SOURCES_FILE", "./config/sources.json")),
             timezone_name=os.getenv("FUELINTEL_TIMEZONE", "America/Guayaquil"),
-            dashboard_hours=int(os.getenv("FUELINTEL_DASHBOARD_HOURS", "10")),
+            dashboard_hours=int(os.getenv("FUELINTEL_DASHBOARD_HOURS", "5")),
             news_max_age_hours=int(os.getenv("FUELINTEL_NEWS_MAX_AGE_HOURS", "36")),
             request_timeout_seconds=int(os.getenv("FUELINTEL_REQUEST_TIMEOUT_SECONDS", "20")),
             supabase_sync_minutes=int(os.getenv("FUELINTEL_SUPABASE_SYNC_MINUTES", "10")),
