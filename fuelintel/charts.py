@@ -25,12 +25,13 @@ AMBER = "#f79009"
 GREEN = "#079455"
 RED = "#d92d20"
 BLUE = "#1570ef"
+PURPLE = "#7f56d9"
 
 COLORS = {
-    "Extra": AMBER,
+    "Extra": BLUE,
     "Ecopaís": GREEN,
-    "Súper": RED,
-    "Diésel Premium": BLUE,
+    "Súper": AMBER,
+    "Diésel Premium": PURPLE,
 }
 
 
@@ -41,20 +42,35 @@ def _color(product: str) -> str:
     return WHITE
 
 
-def _font(size: int, bold: bool = False):
-    names = (
-        [
-            "C:/Windows/Fonts/arialbd.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "DejaVuSans-Bold.ttf",
-        ]
-        if bold
-        else [
-            "C:/Windows/Fonts/arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "DejaVuSans.ttf",
-        ]
-    )
+def _font(size: int, bold: bool = False, mono: bool = False):
+    if mono:
+        names = (
+            [
+                "C:/Windows/Fonts/consolab.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+                "DejaVuSansMono-Bold.ttf",
+            ]
+            if bold
+            else [
+                "C:/Windows/Fonts/consola.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+                "DejaVuSansMono.ttf",
+            ]
+        )
+    else:
+        names = (
+            [
+                "C:/Windows/Fonts/arialbd.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "DejaVuSans-Bold.ttf",
+            ]
+            if bold
+            else [
+                "C:/Windows/Fonts/arial.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "DejaVuSans.ttf",
+            ]
+        )
     for name in names:
         try:
             return ImageFont.truetype(name, size=size)
@@ -72,8 +88,17 @@ def _parse_x(row) -> datetime:
     return datetime.fromisoformat(raw.replace("Z", "+00:00"))
 
 
-def _text(draw: ImageDraw.ImageDraw, xy, value: str, size: int, color=WHITE, bold: bool = False, anchor=None):
-    draw.text(xy, value, font=_font(size, bold), fill=color, anchor=anchor)
+def _text(
+    draw: ImageDraw.ImageDraw,
+    xy,
+    value: str,
+    size: int,
+    color=WHITE,
+    bold: bool = False,
+    anchor=None,
+    mono: bool = False,
+):
+    draw.text(xy, value, font=_font(size, bold, mono), fill=color, anchor=anchor)
 
 
 def choose_chart_kind(dataset: str, points: int, has_ohlc: bool = False) -> str:
