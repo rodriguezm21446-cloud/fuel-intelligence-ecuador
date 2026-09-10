@@ -1,6 +1,10 @@
 name: Fuel Intelligence Cloud Job
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cloud-job.yml"
   workflow_dispatch:
     inputs:
       source_id:
@@ -85,9 +89,32 @@ jobs:
         if: github.event_name == 'schedule'
         run: python -m fuelintel.main --dashboard
 
+      - name: Verify Telegram connection
+        if: github.event_name == 'push'
+        run: |
+          python - <<'PY'
+          import os
+          from fuelintel.telegram import TelegramNotifier
+
+          notifier = TelegramNotifier(
+              os.environ["TELEGRAM_BOT_TOKEN"],
+              os.environ["TELEGRAM_CHAT_ID"],
+              enabled=True,
+              dry_run=False,
+          )
+          sent = notifier.send_text(
+              "PRUEBA TÉCNICA — Fuel Intelligence Ecuador\n"
+              "GitHub Actions, Python y Telegram quedaron conectados. "
+              "Este mensaje no es una noticia."
+          )
+          if not sent:
+              raise SystemExit("Telegram no confirmó el envío")
+          PY
+
       - name: Save analysis memory
         if: always()
         uses: actions/cache/save@v4
         with:
           path: data/runtime
           key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
+
