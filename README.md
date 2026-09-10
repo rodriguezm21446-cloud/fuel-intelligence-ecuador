@@ -1,6 +1,6 @@
 # Fuel Intelligence Ecuador
 
-Monitor privado y verificable de precios y noticias de combustibles para Ecuador. Está diseñado para ejecutarse con pocos recursos en una VM gratuita de Oracle Cloud y enviar por Telegram únicamente datos actuales y confirmados.
+Monitor privado y verificable de precios y noticias de combustibles para Ecuador. Está diseñado para ejecutarse con pocos recursos mediante Cloudflare y GitHub Actions y enviar por Telegram únicamente datos actuales y confirmados.
 
 ## Estado de esta primera versión
 
@@ -18,11 +18,15 @@ Incluye:
 - cálculos con `Decimal`, sin delegar matemáticas a un modelo de IA;
 - memoria local SQLite en modo WAL;
 - mensajes de Telegram con borrador limitado a 280 caracteres;
-- gráfico nacional oscuro de estilo terminal financiera cada 10 horas;
+- gráficos editoriales de alta resolución con HTML/CSS, Chart.js y Playwright;
+- colores estables por combustible, líneas escalonadas y anotaciones automáticas de decretos;
+- histórico, máximos, mínimos y variaciones mensual/anual calculados en cada inserción;
+- bloqueo de `UNKNOWN` y `SOURCE_CONFLICT` antes de publicar;
+- gráfico nacional bajo demanda o cuando entra un precio nuevo confirmado;
 - servicio `systemd` con reinicio automático y límites de CPU/RAM;
 - réplica por lotes hacia Supabase con cola local y reintentos, preparada para revisión;
 
-La réplica hacia Supabase permanece desactivada en modo seguro. El esquema propuesto usa tablas aisladas, pero no se debe ejecutar el SQL sin compararlo primero con las tablas del bot existente.
+El esquema propuesto de Supabase usa tablas aisladas `fuelintel_*`. Debe aplicarse `sql/supabase_schema.sql` una vez antes de activar la réplica remota.
 
 ## Seguridad temporal
 
@@ -57,6 +61,14 @@ FUELINTEL_DRY_RUN=true .venv/bin/python -m fuelintel.main --once
 
 La primera ejecución no envía contenido: registra una línea base para evitar una avalancha de noticias anteriores.
 
+Playwright necesita Chromium una sola vez por entorno:
+
+```powershell
+python -m playwright install chromium
+```
+
+`python -m fuelintel.main --dashboard` crea y envía el gráfico operativo de los últimos cuatro periodos. `python -m fuelintel.main --historical-dashboard` genera el histórico completo solo cuando el operador lo solicita.
+
 ## Pruebas
 
 ```powershell
@@ -78,9 +90,9 @@ Después:
 
 Nunca se deben guardar tokens en el código, el ZIP o GitHub.
 
-## Uso austero en Oracle
+## Uso austero en la nube
 
-El servicio usa un solo proceso, duerme entre consultas, evita navegadores completos y descarga nuevamente solo cuando la fuente cambió. Pillow se carga únicamente al generar el gráfico programado. La plantilla `deploy/fuelintel.service` limita el proceso a 512 MB y 60% de un núcleo y lo reinicia si falla.
+Cloudflare detecta cambios y GitHub Actions hace el procesamiento pesado. Chromium solo se abre cuando hay que capturar un gráfico; las consultas usan `ETag`/`Last-Modified`, el contenido repetido se descarta y el gráfico programado solo se envía cuando su firma cambia.
 
 ## Próximos pasos antes de producción
 
@@ -91,3 +103,4 @@ El servicio usa un solo proceso, duerme entre consultas, evita navegadores compl
 5. Añadir el feed internacional autorizado para cotizaciones intradía, si se contrata.
 6. Ejecutar 24 horas en modo sombra sin notificaciones.
 7. Activar Telegram y después desplegar como servicio en Oracle.
+
