@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 import urllib.request
 
 from .storage import Store
@@ -10,6 +11,7 @@ TABLES = {
     "items": "fuelintel_items",
     "prices": "fuelintel_prices",
     "metrics": "fuelintel_price_metrics",
+    "metrics_delete": "fuelintel_price_metrics",
 }
 
 
@@ -39,11 +41,28 @@ class SupabaseMirror:
             if response.status not in {200, 201, 204}:
                 raise RuntimeError(f"Supabase respondió HTTP {response.status}")
 
+    def _delete_metric(self, payload: dict) -> None:
+        product = urllib.parse.quote(str(payload["product"]), safe="")
+        price_type = urllib.parse.quote(str(payload["price_type"]), safe="")
+        request = urllib.request.Request(
+            f"{self.url}/rest/v1/fuelintel_price_metrics?product=eq.{product}&price_type=eq.{price_type}",
+            method="DELETE",
+            headers={
+                "apikey": self.service_key,
+                "Authorization": f"Bearer {self.service_key}",
+                "Prefer": "return=minimal",
+                "User-Agent": "FuelIntelligenceEcuador/0.1",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            if response.status not in {200, 204}:
+                raise RuntimeError(f"Supabase respondió HTTP {response.status}")
+
     def sync(self, store: Store, limit: int = 300) -> int:
         if not self.enabled:
             return 0
         pending = store.pending_sync(limit)
-        grouped: dict[str, list] = {"items": [], "prices": [], "metrics": []}
+        grouped: dict[str, list] = {"items": [], "prices": [], "metrics": [], "metrics_delete": []}
         for row in pending:
             if row["entity_type"] in grouped:
                 grouped[row["entity_type"]].append(row)
@@ -55,7 +74,11 @@ class SupabaseMirror:
             ids = [int(row["id"]) for row in rows]
             payloads = [json.loads(row["payload_json"]) for row in rows]
             try:
-                self._post(TABLES[entity_type], payloads)
+                if entity_type == "metrics_delete":
+                    for payload in payloads:
+                        self._delete_metric(payload)
+                else:
+                    self._post(TABLES[entity_type], payloads)
             except Exception as exc:
                 store.mark_sync_error(ids, f"{type(exc).__name__}: {exc}")
                 raise
