@@ -9,6 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
+from .ai import DeepSeekEditor
 from .charts import generate_dashboard
 from .config import Settings, load_sources
 from .pipeline import Pipeline
@@ -33,7 +34,8 @@ def build_runtime(settings: Settings):
         settings.telegram_enabled,
         settings.dry_run,
     )
-    pipeline = Pipeline(store, poller, notifier, settings.timezone)
+    editor = DeepSeekEditor(settings.deepseek_api_key, settings.deepseek_model, settings.request_timeout_seconds)
+    pipeline = Pipeline(store, poller, notifier, settings.timezone, editor=editor)
     return store, poller, notifier, pipeline
 
 
@@ -216,3 +218,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
