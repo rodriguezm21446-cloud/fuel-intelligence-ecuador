@@ -86,6 +86,14 @@ def generate_openbb_market_chart(destination: Path) -> Path | None:
         points = [(left + i * (right - left) / max(max_len - 1, 1), osc_bottom - value / 100 * (osc_bottom - osc_top)) for i, value in enumerate(indicator) if value is not None]
         if len(points) > 1:
             draw.line(points, fill=color, width=2)
+    first = min(rows[0][0] for rows in series.values())
+    last = max(rows[-1][0] for rows in series.values())
+    stats = " | ".join(
+        f"{name}: último ${rows[-1][1]:.2f} · máx ${max(v for _, v in rows):.2f} · mín ${min(v for _, v in rows):.2f}"
+        for name, rows in series.items()
+    )
+    _text(draw, (80, 858), stats, 11, WHITE)
+    _text(draw, (80, 880), f"Fuente: OpenBB Platform / Yahoo Finance · Periodo: {first} a {last} · USD por barril", 10, MUTED)
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination, "PNG", optimize=True)
     return destination
