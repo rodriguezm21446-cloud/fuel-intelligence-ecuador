@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -12,15 +13,18 @@ from .storage import Store
 
 
 WIDTH, HEIGHT = 1600, 900
-BG = "#06080b"
-PANEL = "#0d1217"
-GRID = "#26313a"
-MUTED = "#81909c"
-WHITE = "#eef4f8"
-AMBER = "#ffb000"
-GREEN = "#00d084"
-RED = "#ff5964"
-BLUE = "#47a7ff"
+# A light editorial palette stays legible on Telegram and when reposted to X.
+BG = "#f4f6f8"
+PANEL = "#ffffff"
+GRID = "#d9dee5"
+MUTED = "#667085"
+WHITE = "#101828"  # Kept as a compatibility name: this is the primary ink.
+HEADER = "#101828"
+HEADER_TEXT = "#ffffff"
+AMBER = "#f79009"
+GREEN = "#079455"
+RED = "#d92d20"
+BLUE = "#1570ef"
 
 COLORS = {
     "Extra": AMBER,
@@ -72,6 +76,19 @@ def _text(draw: ImageDraw.ImageDraw, xy, value: str, size: int, color=WHITE, bol
     draw.text(xy, value, font=_font(size, bold), fill=color, anchor=anchor)
 
 
+def choose_chart_kind(dataset: str, points: int, has_ohlc: bool = False) -> str:
+    """Choose the simplest truthful visual for the supplied data."""
+    if points < 2:
+        return "card"
+    if dataset == "official_period_price":
+        return "step"
+    if dataset in {"change", "ranking", "comparison"}:
+        return "bar"
+    if has_ohlc and dataset == "market_price":
+        return "candlestick"
+    return "line"
+
+
 def generate_dashboard(store: Store, destination: Path, now_local: datetime, demo: bool = False) -> Path | None:
     rows = store.recent_prices()
     if not rows:
@@ -86,16 +103,17 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
         grouped[row["product"]].append(row)
     for product in grouped:
         grouped[product].sort(key=_parse_x)
+    data_updated_at = max(_parse_x(row) for row in rows)
 
     image = Image.new("RGB", (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(image)
 
-    draw.rectangle((0, 0, WIDTH, 88), fill="#090d11")
+    draw.rectangle((0, 0, WIDTH, 88), fill=HEADER)
     draw.rectangle((0, 0, 9, 88), fill=AMBER)
     _text(draw, (34, 22), "FUEL INTELLIGENCE", 28, AMBER, True)
     _text(draw, (34, 56), "ECUADOR // COMBUSTIBLES Y MERCADOS", 12, MUTED, True)
-    _text(draw, (WIDTH - 32, 31), f"{now_local:%d/%m/%Y  %H:%M} ECU", 15, WHITE, True, "ra")
-    _text(draw, (WIDTH - 32, 57), "DATOS VERIFICADOS · USD/GALÓN", 11, MUTED, False, "ra")
+    _text(draw, (WIDTH - 32, 31), f"DATOS AL {data_updated_at:%d/%m/%Y  %H:%M}", 15, HEADER_TEXT, True, "ra")
+    _text(draw, (WIDTH - 32, 57), "DATOS VERIFICADOS · USD/GALÓN", 11, "#cbd5e1", False, "ra")
     if demo:
         draw.rounded_rectangle((660, 24, 1010, 64), radius=7, fill="#33141a", outline=RED, width=2)
         _text(draw, (835, 44), "VISTA PREVIA · DATOS DE PRUEBA", 13, RED, True, "mm")
@@ -107,7 +125,7 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
     _text(draw, (54, 140), title, 17, WHITE, True)
     _text(draw, (54, 166), subtitle, 12, RED if terminal_only else MUTED, terminal_only)
 
-    plot_left, plot_top, plot_right, plot_bottom = 86, 208, 1082, 615
+    plot_left, plot_top, plot_right, plot_bottom = 86, 208, 1082, 600
     all_values = [float(Decimal(row["price"])) for product_rows in grouped.values() for row in product_rows]
     low, high = min(all_values), max(all_values)
     spread = max(0.10, high - low)
@@ -132,19 +150,30 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
     for product, product_rows in sorted(grouped.items()):
         color = _color(product)
         points = [(x_pos(_parse_x(row)), y_pos(float(Decimal(row["price"])))) for row in product_rows]
-        if len(points) == 1:
+        if choose_chart_kind("official_period_price", len(points)) == "card":
             x, y = points[0]
             draw.line((plot_left, y, plot_right, y), fill=color, width=3)
         else:
-            draw.line(points, fill=color, width=4, joint="curve")
+            # Official Ecuador prices remain fixed for a validity period, so a
+            # staircase is more accurate than a diagonal interpolation.
+            step_points = [points[0]]
+            for previous, current in zip(points, points[1:]):
+                step_points.extend([(current[0], previous[1]), current])
+            draw.line(step_points, fill=color, width=4)
         for x, y in points:
             draw.ellipse((x - 5, y - 5, x + 5, y + 5), fill=color, outline=BG, width=2)
+
+    for step in range(5):
+        when = first_date + (last_date - first_date) * step / 4
+        x = x_pos(when)
+        draw.line((x, plot_bottom, x, plot_bottom + 8), fill=MUTED)
+        _text(draw, (x, plot_bottom + 15), f"{when:%d/%m/%y}", 10, MUTED, anchor="ma")
 
     legend_x = 54
     for product in sorted(grouped):
         color = _color(product)
-        draw.rounded_rectangle((legend_x, 640, legend_x + 16, 656), radius=3, fill=color)
-        _text(draw, (legend_x + 24, 648), product, 11, WHITE, True, "lm")
+        draw.rounded_rectangle((legend_x, 642, legend_x + 16, 658), radius=3, fill=color)
+        _text(draw, (legend_x + 24, 650), product, 11, WHITE, True, "lm")
         legend_x += 56 + int(draw.textlength(product, font=_font(11, True)))
 
     side_x = 1148
@@ -170,25 +199,21 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
 
     footer_y = 711
     draw.rounded_rectangle((28, footer_y, 1572, 856), radius=10, fill=PANEL, outline="#1d2730", width=2)
-    _text(draw, (52, footer_y + 22), "CONTROL DE CALIDAD", 13, AMBER, True)
-    checks = [
-        "OK  Fuentes y periodos guardados",
-        "OK  Variaciones calculadas con Decimal",
-        "OK  Duplicados bloqueados",
-        "OK  Histórico separado del vigente",
-    ]
-    x = 52
-    for check in checks:
-        _text(draw, (x, footer_y + 58), check, 12, WHITE)
-        x += 370
+    _text(draw, (52, footer_y + 22), "CÓMO LEER ESTE GRÁFICO", 13, AMBER, True)
     _text(
         draw,
-        (52, footer_y + 105),
-        "Una estimación nunca se etiqueta como precio oficial. Sin vigencia o confirmación, el dato queda en cuarentena.",
-        12,
-        MUTED,
+        (52, footer_y + 57),
+        "Cada escalón representa un nuevo periodo oficial; una línea plana significa que el precio no cambió.",
+        18,
+        WHITE,
+        True,
     )
-    _text(draw, (1548, footer_y + 106), "SISTEMA PRIVADO", 11, AMBER, True, "ra")
+    newest = max(rows, key=_parse_x)
+    source_url = newest["source_url"]
+    source_name = urlparse(source_url).netloc.removeprefix("www.") or "documento oficial"
+    period = newest["effective_from"] or "fecha de observación"
+    _text(draw, (52, footer_y + 100), f"Fuente oficial: {source_name} · Periodo más reciente: {period} · USD por galón", 11, MUTED)
+    _text(draw, (1548, footer_y + 106), "CÁLCULO AUTOMÁTICO VERIFICADO", 11, AMBER, True, "ra")
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination, "PNG", optimize=True)
