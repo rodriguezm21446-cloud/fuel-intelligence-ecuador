@@ -67,6 +67,7 @@ class DataArchitectureTests(unittest.TestCase):
             store.mark_source_conflict(petro)
             self.assertEqual(store.recent_prices(), [])
             self.assertEqual(store.price_metrics(), [])
+            self.assertIn("metrics_delete", {row["entity_type"] for row in store.pending_sync()})
 
     def test_axis_ends_at_last_confirmed_date(self):
         with tempfile.TemporaryDirectory() as folder:
