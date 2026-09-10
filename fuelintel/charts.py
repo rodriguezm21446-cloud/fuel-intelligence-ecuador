@@ -30,6 +30,13 @@ COLORS = {
 }
 
 
+def _color(product: str) -> str:
+    for name, color in COLORS.items():
+        if product.startswith(name):
+            return color
+    return WHITE
+
+
 def _font(size: int, bold: bool = False):
     names = (
         [
@@ -70,6 +77,10 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
     if not rows:
         return None
 
+    consumer_rows = [row for row in rows if "terminal automotriz" not in row["product"].lower()]
+    terminal_only = not consumer_rows
+    rows = rows if terminal_only else consumer_rows
+
     grouped: dict[str, list] = defaultdict(list)
     for row in rows:
         grouped[row["product"]].append(row)
@@ -91,8 +102,10 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
 
     chart_box = (28, 116, 1120, 675)
     draw.rounded_rectangle(chart_box, radius=10, fill=PANEL, outline="#1d2730", width=2)
-    _text(draw, (54, 140), "EVOLUCIÓN DE PRECIOS NACIONALES", 17, WHITE, True)
-    _text(draw, (54, 166), "Serie histórica por periodo de vigencia", 11, MUTED)
+    title = "PRECIOS OFICIALES EN TERMINAL" if terminal_only else "PRECIOS AL CONSUMIDOR EN ECUADOR"
+    subtitle = "NO ES PRECIO FINAL DE GASOLINERA" if terminal_only else "USD por galón · comparación por periodo de vigencia"
+    _text(draw, (54, 140), title, 17, WHITE, True)
+    _text(draw, (54, 166), subtitle, 12, RED if terminal_only else MUTED, terminal_only)
 
     plot_left, plot_top, plot_right, plot_bottom = 86, 208, 1082, 615
     all_values = [float(Decimal(row["price"])) for product_rows in grouped.values() for row in product_rows]
@@ -117,7 +130,7 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
         return plot_bottom - ((value - low) / (high - low)) * (plot_bottom - plot_top)
 
     for product, product_rows in sorted(grouped.items()):
-        color = COLORS.get(product, WHITE)
+        color = _color(product)
         points = [(x_pos(_parse_x(row)), y_pos(float(Decimal(row["price"])))) for row in product_rows]
         if len(points) == 1:
             x, y = points[0]
@@ -129,7 +142,7 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
 
     legend_x = 54
     for product in sorted(grouped):
-        color = COLORS.get(product, WHITE)
+        color = _color(product)
         draw.rounded_rectangle((legend_x, 640, legend_x + 16, 656), radius=3, fill=color)
         _text(draw, (legend_x + 24, 648), product, 11, WHITE, True, "lm")
         legend_x += 56 + int(draw.textlength(product, font=_font(11, True)))
@@ -141,7 +154,7 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
         current = Decimal(product_rows[-1]["price"])
         previous = Decimal(product_rows[-2]["price"]) if len(product_rows) > 1 else None
         change = price_change(current, previous)
-        color = COLORS.get(product, WHITE)
+        color = _color(product)
         draw.rounded_rectangle((side_x, card_y, 1572, card_y + 105), radius=9, fill=PANEL, outline="#1d2730", width=2)
         draw.rectangle((side_x, card_y, side_x + 7, card_y + 105), fill=color)
         _text(draw, (side_x + 24, card_y + 18), product.upper(), 13, MUTED, True)
@@ -180,3 +193,4 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination, "PNG", optimize=True)
     return destination
+
