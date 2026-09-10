@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from .ai import GeminiEditor
 from .charts import generate_dashboard
+from .openbb_chart import generate_openbb_market_chart
 from .config import Settings, load_sources
 from .pipeline import Pipeline
 from .sources import HttpClient, SourcePoller
@@ -91,10 +92,14 @@ def dashboard(settings: Settings) -> int:
     now_local = datetime.now(timezone.utc).astimezone(settings.timezone)
     output = settings.data_dir / "charts" / f"dashboard-{now_local:%Y%m%d-%H%M}.png"
     generated = generate_dashboard(store, output, now_local)
-    if generated is None:
-        LOG.warning("no hay precios verificados suficientes para crear el gráfico")
+    if generated:
+        notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M}")
+    market = generate_openbb_market_chart(settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png")
+    if market:
+        notifier.send_photo(market, f"OpenBB: Brent, WTI y Stoch RSI — {now_local:%d/%m/%Y %H:%M}")
+    if generated is None and market is None:
+        LOG.warning("no hubo datos suficientes para crear gráficos")
         return 2
-    notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M}")
     store.set_meta("last_dashboard_at", datetime.now(timezone.utc).isoformat())
     return 0
 
