@@ -288,6 +288,7 @@ class Store:
         ).fetchall()
         if not rows:
             db.execute("DELETE FROM fuel_price_metrics WHERE product = ? AND price_type = ?", (product, price_type))
+            self._enqueue(db, "metrics_delete", f"{product}|{price_type}", {"product": product, "price_type": price_type})
             return
         latest = rows[-1]
         current = Decimal(latest["price"])
@@ -364,6 +365,12 @@ class Store:
 
     @staticmethod
     def _enqueue(db: sqlite3.Connection, entity_type: str, dedupe_key: str, payload: dict) -> None:
+        opposite = {"metrics": "metrics_delete", "metrics_delete": "metrics"}.get(entity_type)
+        if opposite:
+            db.execute(
+                "DELETE FROM sync_outbox WHERE entity_type = ? AND dedupe_key = ?",
+                (opposite, dedupe_key),
+            )
         db.execute(
             """
             INSERT INTO sync_outbox(entity_type, dedupe_key, payload_json, created_at)
