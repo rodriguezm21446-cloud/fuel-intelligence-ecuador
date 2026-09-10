@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import signal
 import sys
@@ -96,7 +97,14 @@ def dashboard(settings: Settings) -> int:
         notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M}")
     market = generate_openbb_market_chart(settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png")
     if market:
-        notifier.send_photo(market, f"OpenBB: Brent, WTI y Stoch RSI — {now_local:%d/%m/%Y %H:%M}")
+        signature = hashlib.sha256(market.read_bytes()).hexdigest()
+        if signature != store.get_meta("last_openbb_chart_signature"):
+            notifier.send_photo(market, f"OpenBB: Brent, WTI y Stoch RSI — {now_local:%d/%m/%Y %H:%M}")
+            store.set_meta("last_openbb_chart_signature", signature)
+        store.set_meta("last_openbb_chart_error", "")
+    elif store.get_meta("last_openbb_chart_error") != "sin_datos":
+        notifier.send_text("ALERTA TÉCNICA: OpenBB no entregó datos suficientes. El gráfico no se publicó y se reintentará en 5 horas.")
+        store.set_meta("last_openbb_chart_error", "sin_datos")
     if generated is None and market is None:
         LOG.warning("no hubo datos suficientes para crear gráficos")
         return 2
