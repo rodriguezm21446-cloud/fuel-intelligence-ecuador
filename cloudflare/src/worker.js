@@ -20,6 +20,13 @@ function isRelevant(title = "", summary = "") {
   return TOPIC_WORDS.some((word) => text.includes(word));
 }
 
+function isRelevantCandidate(source, raw) {
+  if (source.id === "petroecuador-historico") {
+    return /\/ESTRUCTURA-DE-PRECIOS[^/]*\.pdf(?:$|\?)/i.test(raw.url);
+  }
+  return isRelevant(raw.title, raw.summary);
+}
+
 function canonicalUrl(value, base) {
   try {
     const url = new URL(value, base);
@@ -147,7 +154,7 @@ async function dispatchGithub(env, candidate, corroboratedBy = "") {
 }
 
 async function saveCandidate(env, source, raw, bootstrap, detectedAt) {
-  if (!isRelevant(raw.title, raw.summary)) return;
+  if (!isRelevantCandidate(source, raw)) return;
   const eventKey = await sha256(`${source.id}\n${raw.url}\n${normalizeText(raw.title)}`);
   const status = bootstrap ? "baseline" : (source.trust >= 90 ? "ready" : "pending_corroboration");
   const inserted = await env.DB.prepare(
