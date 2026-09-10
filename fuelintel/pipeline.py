@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from .ai import DeepSeekEditor
 from .calculations import price_change
 from .extractors import extract_effective_period, extract_fuel_prices
 from .filters import evaluate_candidate, relevance_score
-from .formatting import format_news_alert, format_price_alert
+from .formatting import compose_x_prices, format_news_alert, format_price_alert
 from .models import Candidate, Decision, VerificationStatus
 from .sources import SourcePoller
 from .storage import Store
@@ -23,11 +24,12 @@ class ProcessResult:
 
 
 class Pipeline:
-    def __init__(self, store: Store, poller: SourcePoller, notifier: TelegramNotifier, timezone):
+    def __init__(self, store: Store, poller: SourcePoller, notifier: TelegramNotifier, timezone, editor: DeepSeekEditor | None = None):
         self.store = store
         self.poller = poller
         self.notifier = notifier
         self.timezone = timezone
+        self.editor = editor
 
     def process(
         self,
@@ -98,14 +100,20 @@ class Pipeline:
                 self.store.save_price(item)
             if not allow_notify:
                 return ProcessResult(decision.status, False, item_id, "línea base vigente guardada sin notificar")
-            message = format_price_alert(candidate, prices, changes, local_now)
+            fallback = format_price_alert(candidate, prices, changes, local_now)
+            editorial = self.editor.review(fallback, compose_x_prices(prices, changes)) if self.editor else None
+            message = format_price_alert(candidate, prices, changes, local_now, editorial)
             notified = self.notifier.send_text(message)
         else:
             if not allow_notify:
                 return ProcessResult(decision.status, False, item_id, "línea base guardada sin notificar")
-            message = format_news_alert(candidate, local_now, corroborated)
+            fallback = format_news_alert(candidate, local_now, corroborated)
+            fallback_x = fallback.split("TEXTO PARA X:\n", 1)[-1].split("\n\nFuente:", 1)[0]
+            editorial = self.editor.review(fallback, fallback_x) if self.editor else None
+            message = format_news_alert(candidate, local_now, corroborated, editorial)
             notified = self.notifier.send_text(message)
 
         if notified:
             self.store.mark_notified(item_id)
         return ProcessResult(decision.status, notified, item_id, "verificada")
+
