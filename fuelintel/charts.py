@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -112,6 +113,18 @@ def choose_chart_kind(dataset: str, points: int, has_ohlc: bool = False) -> str:
     if has_ohlc and dataset == "market_price":
         return "candlestick"
     return "line"
+
+
+def brand_name() -> str:
+    raw = os.getenv("FUELINTEL_BRAND_NAME", "FUEL INTELLIGENCE ECUADOR")
+    clean = " ".join(raw.split()).upper()[:48]
+    return clean or "FUEL INTELLIGENCE ECUADOR"
+
+
+def own_data_label(estimated: bool = False) -> str:
+    if estimated:
+        return f"ESTIMACIÓN PROPIA — {brand_name()} — NO ES DATO OFICIAL"
+    return f"CÁLCULOS Y VISUALIZACIÓN: {brand_name()}"
 
 
 def generate_dashboard(store: Store, destination: Path, now_local: datetime, demo: bool = False) -> Path | None:
@@ -237,8 +250,8 @@ def generate_dashboard(store: Store, destination: Path, now_local: datetime, dem
     source_url = newest["source_url"]
     source_name = urlparse(source_url).netloc.removeprefix("www.") or "documento oficial"
     period = newest["effective_from"] or "fecha de observación"
-    _text(draw, (52, footer_y + 100), f"Fuente oficial: {source_name} · Periodo más reciente: {period} · USD por galón", 11, MUTED)
-    _text(draw, (1548, footer_y + 106), "CÁLCULO AUTOMÁTICO VERIFICADO", 11, AMBER, True, "ra")
+    _text(draw, (52, footer_y + 96), f"FUENTE OFICIAL: {source_name} · PERIODO: {period} · USD POR GALÓN", 11, WHITE, True, mono=True)
+    _text(draw, (1548, footer_y + 96), own_data_label(), 11, AMBER, True, "ra", mono=True)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     image.save(destination, "PNG", optimize=True)
