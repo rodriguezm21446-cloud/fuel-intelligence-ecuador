@@ -57,7 +57,8 @@ class GeminiEditor:
             "generationConfig": {
                 "temperature": 0.1,
                 "maxOutputTokens": 700,
-                "responseFormat": {"text": {"mimeType": "application/json", "schema": schema}},
+                "responseMimeType": "application/json",
+                "responseSchema": schema,
             },
         }
         request = urllib.request.Request(
