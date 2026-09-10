@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from .ai import DeepSeekEditor
+from .ai import GeminiEditor
 from .calculations import price_change
 from .extractors import extract_effective_period, extract_fuel_prices
 from .filters import evaluate_candidate, relevance_score
@@ -24,7 +24,7 @@ class ProcessResult:
 
 
 class Pipeline:
-    def __init__(self, store: Store, poller: SourcePoller, notifier: TelegramNotifier, timezone, editor: DeepSeekEditor | None = None):
+    def __init__(self, store: Store, poller: SourcePoller, notifier: TelegramNotifier, timezone, editor: GeminiEditor | None = None):
         self.store = store
         self.poller = poller
         self.notifier = notifier
