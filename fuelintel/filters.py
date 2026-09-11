@@ -26,6 +26,18 @@ HIGH_VALUE_TERMS = {
     "derivados": 3,
     "petroecuador": 5,
     "arch": 4,
+    "gasoline": 5,
+    "diesel fuel": 5,
+    "crude oil": 4,
+    "refinery": 4,
+    "refining": 3,
+    "inventory": 4,
+    "inventories": 4,
+    "shortage": 6,
+    "outage": 5,
+    "volatility": 3,
+    "rbob": 6,
+    "ulsd": 6,
 }
 
 EXCLUSION_TERMS = {
@@ -94,3 +106,4 @@ def evaluate_candidate(
 
     reasons.append("requiere confirmación independiente")
     return Decision(VerificationStatus.PENDING, min(79, candidate.source.trust), tuple(reasons), score)
+
