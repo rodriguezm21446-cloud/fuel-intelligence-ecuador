@@ -51,7 +51,7 @@ class ChartTests(unittest.TestCase):
                 )
             )
             payload = build_national_payload(store)
-            self.assertEqual(payload["title"], "Precios de combustible en Ecuador")
+            self.assertEqual(payload["title"], "Precio vigente de combustible en Ecuador")
             self.assertEqual(payload["datasets"][0]["color"], "#8A8A8A")
             self.assertIn("Chart", build_chart_html(payload))
             destination = root / "dashboard.png"
