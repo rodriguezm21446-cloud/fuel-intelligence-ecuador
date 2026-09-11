@@ -60,8 +60,8 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       FUELINTEL_AI_REVISION: "7"
-      FUELINTEL_CHART_REVISION: "5"
-      FUELINTEL_BRAND_NAME: "@PreciosCombustibleEC"
+      FUELINTEL_CHART_REVISION: "6"
+      FUELINTEL_BRAND_NAME: "@combustibleEc"
       FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
       FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
       FUELINTEL_EVENT_TITLE: ${{ inputs.event_title }}
