@@ -2,7 +2,9 @@
 const TOPIC_WORDS = [
   "gasolina", "ecopais", "extra", "super", "diesel", "combustible",
   "petroleo", "crudo", "brent", "wti", "opep", "opec", "refineria",
-  "subsidio", "hidrocarburo", "derivados", "petroecuador", "arch"
+  "subsidio", "hidrocarburo", "derivados", "petroecuador", "arch",
+  "gasoline", "diesel fuel", "crude oil", "refinery", "refining", "inventory",
+  "inventories", "shortage", "outage", "volatility", "rbob", "ulsd"
 ];
 const TRACKING_KEYS = new Set([
   "fbclid", "gclid", "mc_cid", "mc_eid", "utm_campaign", "utm_content",
@@ -104,16 +106,18 @@ async function sha256(value) {
 }
 
 const SOURCES = [
-  { id: "arch-precios", name: "ARCH - Precios de derivados", url: "https://controlhidrocarburos.gob.ec/precios-gasolinas-extra-y-ecopais/", kind: "html", trust: 100 },
-  { id: "arch-biblioteca", name: "ARCH - Biblioteca y resoluciones", url: "https://controlhidrocarburos.gob.ec/biblioteca/", kind: "links", trust: 100 },
-  { id: "presidencia-decretos", name: "Presidencia - Decretos", url: "https://minka.presidencia.gob.ec/", kind: "links", trust: 100 },
-  { id: "bce-petroleo", name: "BCE - Estadísticas petroleras", url: "https://contenido.bce.fin.ec/?bcedata_grid_app=1", kind: "html", trust: 100 },
-  { id: "petroecuador-precios", name: "EP Petroecuador - Estructuras de precios", url: "https://www.eppetroecuador.ec/?s=estructura+de+precios", kind: "links", trust: 100 },
-  { id: "petroecuador-historico", name: "EP Petroecuador - Histórico mensual de precios en terminal", url: "https://www.eppetroecuador.ec/?p=20421", kind: "links", trust: 100 },
-  { id: "eluniverso-economia-rss", name: "El Universo - Economía", url: "https://www.eluniverso.com/arc/outboundfeeds/rss-subsection/noticias/economia?outputType=xml", kind: "rss", trust: 75 },
-  { id: "primicias-economia", name: "Primicias - Economía", url: "https://www.primicias.ec/economia/", kind: "links", trust: 75 },
-  { id: "ecuavisa-economia", name: "Ecuavisa - Economía", url: "https://www.ecuavisa.com/economia", kind: "links", trust: 75 },
-  { id: "opec-press", name: "OPEP - Comunicados", url: "https://www.opec.org/", kind: "links", trust: 95 }
+  { id: "arch-precios", name: "ARCH - Precios de derivados", url: "https://controlhidrocarburos.gob.ec/precios-gasolinas-extra-y-ecopais/", kind: "html", trust: 100, pollSeconds: 60 },
+  { id: "arch-biblioteca", name: "ARCH - Biblioteca y resoluciones", url: "https://controlhidrocarburos.gob.ec/biblioteca/", kind: "links", trust: 100, pollSeconds: 120 },
+  { id: "presidencia-decretos", name: "Presidencia - Decretos", url: "https://minka.presidencia.gob.ec/", kind: "links", trust: 100, pollSeconds: 120 },
+  { id: "bce-petroleo", name: "BCE - Estadísticas petroleras", url: "https://contenido.bce.fin.ec/?bcedata_grid_app=1", kind: "html", trust: 100, pollSeconds: 1800 },
+  { id: "petroecuador-precios", name: "EP Petroecuador - Estructuras de precios", url: "https://www.eppetroecuador.ec/?s=estructura+de+precios", kind: "links", trust: 100, pollSeconds: 60 },
+  { id: "petroecuador-historico", name: "EP Petroecuador - Histórico mensual de precios en terminal", url: "https://www.eppetroecuador.ec/?p=20421", kind: "links", trust: 100, pollSeconds: 60 },
+  { id: "eluniverso-economia-rss", name: "El Universo - Economía", url: "https://www.eluniverso.com/arc/outboundfeeds/rss-subsection/noticias/economia?outputType=xml", kind: "rss", trust: 75, pollSeconds: 60 },
+  { id: "primicias-economia", name: "Primicias - Economía", url: "https://www.primicias.ec/economia/", kind: "links", trust: 75, pollSeconds: 120 },
+  { id: "ecuavisa-economia", name: "Ecuavisa - Economía", url: "https://www.ecuavisa.com/economia", kind: "links", trust: 75, pollSeconds: 60 },
+  { id: "opec-press", name: "OPEP - Comunicados", url: "https://www.opec.org/", kind: "links", trust: 95, pollSeconds: 300 },
+  { id: "cnbc-finance-rss", name: "CNBC - Finance RSS", url: "https://www.cnbc.com/id/10000664/device/rss/rss.html", kind: "rss", trust: 82, pollSeconds: 60 },
+  { id: "eia-weekly-petroleum", name: "EIA - Weekly Petroleum Status Report", url: "https://www.eia.gov/petroleum/supply/weekly/", kind: "html", trust: 100, pollSeconds: 300 }
 ];
 
 const USER_AGENT = "FuelIntelligenceEcuador/0.2 (+verified private monitor)";
@@ -227,9 +231,14 @@ async function pollSource(env, source, state, detectedAt) {
 
 async function pollAll(env) {
   const detectedAt = new Date().toISOString();
+  const nowMs = Date.parse(detectedAt);
   const states = await env.DB.prepare("SELECT * FROM source_state").all();
   const byId = new Map((states.results || []).map((state) => [state.source_id, state]));
-  await Promise.all(SOURCES.map((source) => pollSource(env, source, byId.get(source.id), detectedAt)));
+  const due = SOURCES.filter((source) => {
+    const checkedAt = Date.parse(byId.get(source.id)?.checked_at || "");
+    return !Number.isFinite(checkedAt) || nowMs - checkedAt >= (source.pollSeconds || 60) * 1000;
+  });
+  await Promise.all(due.map((source) => pollSource(env, source, byId.get(source.id), detectedAt)));
 }
 
 export default {
