@@ -14,5 +14,7 @@ data/*.sqlite3
 data/live-*/
 data/charts/dashboard-*.png
 data/chart-preview.png
+data/visual-qa.png
+data/visual-qa-crops/
 data/secrets/
 
