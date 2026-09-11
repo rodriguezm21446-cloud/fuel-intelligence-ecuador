@@ -20,6 +20,7 @@ def official_price(
     *,
     source: str = "ARCH",
     status: str = "CONFIRMED",
+    decree: str = "",
 ) -> FuelPrice:
     stamp = datetime(effective.year, effective.month, effective.day, 15, 30, tzinfo=timezone.utc)
     return FuelPrice(
@@ -31,6 +32,7 @@ def official_price(
         verified_at=stamp,
         price_type=PriceType.PUBLICO,
         source_name=source,
+        decree_resolution=decree,
         verification_status=status,
     )
 
@@ -96,9 +98,39 @@ class DataArchitectureTests(unittest.TestCase):
         html = build_chart_html(payload)
         self.assertIn("font-family: Inter, Arial, sans-serif", html)
         self.assertIn("position: 'right'", html)
+        self.assertIn("align: 'inner'", html)
+        self.assertIn("mirror: true", html)
         self.assertIn("grid: { display: false }", html)
+        self.assertIn("margin: 0 90px 0 70px", html)
+        self.assertIn("right: 70, bottom: 12, left: 60", html)
+        self.assertIn("overflow: visible", html)
+        self.assertIn("const DISPLAY_DECIMALS = 3", html)
+        self.assertNotIn("P.decimals", html)
+        self.assertGreaterEqual(html.count("formatMoney("), 3)
+        self.assertIn("ctx.moveTo(x, area.top); ctx.lineTo(x, area.bottom)", html)
         for forbidden in ("Courier", "Consolas", "monospace", "linear-gradient", "box-shadow", "text-shadow"):
             self.assertNotIn(forbidden, html)
+
+    def test_shared_decree_is_drawn_once_for_all_series(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            decree = "Decreto Ejecutivo No. 308"
+            store.save_price(official_price("Extra", "2.400", date(2026, 7, 12)))
+            store.save_price(official_price("Diésel Premium", "2.500", date(2026, 7, 12)))
+            store.save_price(official_price("Extra", "2.500", date(2026, 8, 12), decree=decree))
+            store.save_price(official_price("Diésel Premium", "2.600", date(2026, 8, 12), decree=decree))
+            payload = build_national_payload(store)
+            self.assertEqual(payload["annotations"], [{"index": 1, "text": decree}])
+
+    def test_historical_ranges_are_all_or_none(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            store.save_price(official_price("Extra", "2.500", date(2026, 8, 12)))
+            store.save_price(official_price("Diésel Premium", "2.600", date(2026, 8, 12)))
+            with store.connect() as db:
+                db.execute("DELETE FROM fuel_price_metrics WHERE product = ?", ("Diésel Premium",))
+            payload = build_national_payload(store)
+            self.assertEqual(payload["references"], [])
 
 
 if __name__ == "__main__":
