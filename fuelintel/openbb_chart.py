@@ -60,8 +60,8 @@ def build_market_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict
             {
                 "label": name,
                 "color": colors.get(name, "#8A8A8A"),
-                "min": f"{min(raw_values):.2f}",
-                "max": f"{max(raw_values):.2f}",
+                "min": min(raw_values),
+                "max": max(raw_values),
             }
         )
     insight = "Solo hay una referencia disponible; no se calcula el diferencial."
@@ -77,7 +77,6 @@ def build_market_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict
         "annotations": [],
         "references": references,
         "stepped": False,
-        "decimals": 2,
         "insight": insight,
         "source": f"Fuente: OpenBB Platform · Proveedor: Yahoo Finance · Verificado: {verified:%d/%m/%Y %H:%M} ECT",
         "credit": own_data_label(),
