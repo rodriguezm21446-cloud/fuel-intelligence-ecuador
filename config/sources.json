@@ -121,6 +121,30 @@
     "poll_seconds": 180,
     "idle_poll_seconds": 300,
     "max_age_hours": 72
+  },
+  {
+    "id": "cnbc-finance-rss",
+    "name": "CNBC - Finance RSS",
+    "url": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+    "kind": "rss",
+    "trust": 82,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 18
+  },
+  {
+    "id": "eia-weekly-petroleum",
+    "name": "EIA - Weekly Petroleum Status Report",
+    "url": "https://www.eia.gov/petroleum/supply/weekly/",
+    "kind": "html",
+    "trust": 100,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 300,
+    "idle_poll_seconds": 3600,
+    "max_age_hours": 192
   }
 ]
 
