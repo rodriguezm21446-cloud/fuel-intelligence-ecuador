@@ -1,7 +1,9 @@
 export const TOPIC_WORDS = [
   "gasolina", "ecopais", "extra", "super", "diesel", "combustible",
   "petroleo", "crudo", "brent", "wti", "opep", "opec", "refineria",
-  "subsidio", "hidrocarburo", "derivados", "petroecuador", "arch"
+  "subsidio", "hidrocarburo", "derivados", "petroecuador", "arch",
+  "gasoline", "diesel fuel", "crude oil", "refinery", "refining", "inventory",
+  "inventories", "shortage", "outage", "volatility", "rbob", "ulsd"
 ];
 
 const TRACKING_KEYS = new Set([
