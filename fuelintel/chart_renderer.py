@@ -4,10 +4,14 @@ import json
 from pathlib import Path
 
 
-CHART_JS_URL = "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+CHART_JS_URLS = (
+    "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js",
+    "https://unpkg.com/chart.js@4.4.7/dist/chart.umd.min.js",
+)
+DISPLAY_DECIMALS = 3
 
 
-def build_chart_html(payload: dict) -> str:
+def build_chart_html(payload: dict, chart_js_url: str = CHART_JS_URLS[0]) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     return f"""<!doctype html>
 <html lang="es">
@@ -16,20 +20,20 @@ def build_chart_html(payload: dict) -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <script src="{CHART_JS_URL}"></script>
+  <script src="{chart_js_url}"></script>
   <style>
     * {{ box-sizing: border-box; }}
     html, body {{ margin: 0; width: 1600px; height: 900px; overflow: hidden; background: #000; }}
     body {{ color: #e8e8e8; font-family: Inter, Arial, sans-serif; font-variant-numeric: tabular-nums; }}
-    main {{ width: 1600px; height: 900px; padding: 42px 54px 28px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; }}
+    main {{ width: 1600px; height: 900px; padding: 42px 60px 28px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; }}
     h1 {{ margin: 0; font-size: 37px; line-height: 1.1; letter-spacing: -0.025em; }}
     .subtitle {{ margin-top: 8px; color: #a7adb4; font-size: 19px; }}
     .legend {{ display: flex; flex-wrap: wrap; gap: 24px; min-height: 28px; align-items: center; font-size: 16px; }}
     .legend-item {{ display: flex; gap: 9px; align-items: center; }}
     .swatch {{ width: 27px; height: 4px; display: inline-block; }}
     .pending {{ border-top: 3px dashed #a7adb4; height: 0; }}
-    .plot {{ position: relative; min-height: 0; }}
-    canvas {{ width: 100% !important; height: 100% !important; }}
+    .plot {{ position: relative; min-height: 0; margin: 0 90px 0 70px; overflow: visible; }}
+    canvas {{ width: 100% !important; height: 100% !important; overflow: visible; }}
     footer {{ min-height: 86px; display: grid; align-content: end; gap: 7px; }}
     .insight {{ color: #e8e8e8; font-size: 17px; font-weight: 600; }}
     .source {{ color: #a7adb4; font-size: 13px; }}
@@ -45,6 +49,8 @@ def build_chart_html(payload: dict) -> str:
 </main>
 <script>
 const P = {encoded};
+const DISPLAY_DECIMALS = {DISPLAY_DECIMALS};
+const formatMoney = value => '$' + Number(value).toFixed(DISPLAY_DECIMALS);
 document.getElementById('title').textContent = P.title;
 document.getElementById('subtitle').textContent = P.subtitle;
 document.getElementById('insight').textContent = P.insight;
@@ -56,7 +62,9 @@ for (const ds of P.datasets) {{
   const swatch = document.createElement('span'); swatch.className = 'swatch' + (ds.pending ? ' pending' : '');
   swatch.style.background = ds.pending ? 'transparent' : ds.color;
   if (ds.pending) swatch.style.borderColor = ds.color;
-  const label = document.createElement('span'); label.textContent = ds.label + (ds.pending ? ' · pendiente' : '');
+  const ref = (P.references || []).find(item => item.label === ds.label);
+  const range = ref ? ` · hist. ${{formatMoney(ref.min)}}–${{formatMoney(ref.max)}}` : '';
+  const label = document.createElement('span'); label.textContent = ds.label + range + (ds.pending ? ' · pendiente' : '');
   item.append(swatch, label); legend.append(item);
 }}
 const annotationPlugin = {{
@@ -69,20 +77,15 @@ const annotationPlugin = {{
       ds.data.forEach((value, i) => {{ if (value !== null && value !== undefined) last = i; }});
       if (last >= 0 && meta.data[last]) {{
         const point = meta.data[last]; ctx.fillStyle = ds.borderColor; ctx.beginPath(); ctx.arc(point.x, point.y, 3.5, 0, Math.PI * 2); ctx.fill();
-        ctx.textAlign = 'right'; ctx.fillText(`${{ds.label}} $${{Number(ds.data[last]).toFixed(3)}}`, area.right - 6, point.y - 9);
+        ctx.textAlign = 'right'; ctx.fillText(`${{ds.label}} ${{formatMoney(ds.data[last])}}`, area.right - 6, point.y - 9);
       }}
     }});
     ctx.font = '600 11px Inter, Arial, sans-serif'; ctx.fillStyle = '#a7adb4';
     for (const note of (P.annotations || [])) {{
       const x = chart.scales.x.getPixelForValue(note.index);
-      const y = chart.scales.y.getPixelForValue(note.value);
       ctx.setLineDash([3, 4]); ctx.strokeStyle = '#777';
-      ctx.beginPath(); ctx.moveTo(x, y - 23); ctx.lineTo(x, y + 23); ctx.stroke();
-      ctx.setLineDash([]); ctx.textAlign = 'left'; ctx.fillText(note.text, x + 5, y - 9);
-    }}
-    let refY = area.top + 18; ctx.textAlign = 'right';
-    for (const ref of (P.references || [])) {{
-      ctx.fillStyle = ref.color; ctx.fillText(`${{ref.label}} · hist. $${{ref.min}}–$${{ref.max}}`, area.right - 6, refY); refY += 17;
+      ctx.beginPath(); ctx.moveTo(x, area.top); ctx.lineTo(x, area.bottom); ctx.stroke();
+      ctx.setLineDash([]); ctx.textAlign = 'left'; ctx.fillText(note.text, x + 6, area.top + 15);
     }}
     ctx.strokeStyle = '#6f747a'; ctx.lineWidth = 1;
     for (let index = 0; index < chart.data.labels.length; index += 1) {{
@@ -102,11 +105,11 @@ new Chart(document.getElementById('chart'), {{
   }})) }},
   options: {{
     responsive: true, maintainAspectRatio: false, animation: false, normalized: true,
-    layout: {{ padding: {{ top: 12, right: 18, left: 32 }} }},
+    layout: {{ padding: {{ top: 12, right: 70, bottom: 12, left: 60 }} }},
     plugins: {{ legend: {{ display: false }}, tooltip: {{ enabled: false }} }},
     scales: {{
-      x: {{ grid: {{ display: false }}, border: {{ display: false }}, ticks: {{ color: '#a7adb4', maxTicksLimit: 6, font: {{ family: 'Inter', size: 12 }} }} }},
-      y: {{ position: 'right', grid: {{ display: false }}, border: {{ display: false }}, ticks: {{ color: '#d1d5db', callback: value => '$' + Number(value).toFixed(P.decimals || 2), font: {{ family: 'Inter', size: 12 }} }} }}
+      x: {{ grid: {{ display: false }}, border: {{ display: false }}, ticks: {{ align: 'inner', color: '#a7adb4', maxTicksLimit: 6, font: {{ family: 'Inter', size: 12 }} }} }},
+      y: {{ position: 'right', grid: {{ display: false }}, border: {{ display: false }}, ticks: {{ mirror: true, padding: 10, color: '#d1d5db', callback: value => formatMoney(value), font: {{ family: 'Inter', size: 12 }} }} }}
     }}
   }}
 }});
@@ -121,10 +124,21 @@ def render_chart(payload: dict, destination: Path) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1600, "height": 900}, device_scale_factor=2)
-        page.set_content(build_chart_html(payload), wait_until="networkidle", timeout=60_000)
-        page.wait_for_function("window.__chartReady === true", timeout=30_000)
-        page.screenshot(path=str(destination), full_page=False)
+        last_error = None
+        for chart_js_url in CHART_JS_URLS:
+            page = browser.new_page(viewport={"width": 1600, "height": 900}, device_scale_factor=2)
+            try:
+                page.set_content(build_chart_html(payload, chart_js_url), wait_until="domcontentloaded", timeout=30_000)
+                page.wait_for_function("window.__chartReady === true", timeout=30_000)
+                page.screenshot(path=str(destination), full_page=False)
+                last_error = None
+                break
+            except Exception as error:
+                last_error = error
+            finally:
+                page.close()
         browser.close()
+        if last_error is not None:
+            raise RuntimeError("No se pudo cargar Chart.js desde los CDN permitidos") from last_error
     return destination
 
