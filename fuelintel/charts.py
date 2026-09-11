@@ -34,9 +34,9 @@ def choose_chart_kind(dataset: str, points: int, has_ohlc: bool = False) -> str:
 
 
 def brand_name() -> str:
-    raw = os.getenv("FUELINTEL_BRAND_NAME", "@PreciosCombustibleEC")
+    raw = os.getenv("FUELINTEL_BRAND_NAME", "@combustibleEc")
     clean = " ".join(raw.split())[:48]
-    return clean or "@PreciosCombustibleEC"
+    return clean or "@combustibleEc"
 
 
 def own_data_label(estimated: bool = False) -> str:
@@ -102,7 +102,6 @@ def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | 
     grouped = _combine_extra_ecopais(grouped)
 
     datasets = []
-    annotations = []
     for label, product_rows in sorted(grouped.items()):
         by_date = {_when(row).date().isoformat(): row for row in product_rows}
         pending = any(row["verification_status"] != "CONFIRMED" for row in product_rows)
@@ -114,11 +113,27 @@ def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | 
                 "pending": pending,
             }
         )
-        for day, row in by_date.items():
-            if row["decree_resolution"]:
-                annotations.append(
-                    {"index": dates.index(day), "value": float(row["price"]), "text": row["decree_resolution"][:36]}
-                )
+
+    # A decree is an event on the shared time axis, not an attribute to repeat
+    # beside every series. Only annotate a transition observed inside the range.
+    decrees_by_date: dict[str, tuple[str, ...]] = {}
+    for day in dates:
+        decrees_by_date[day] = tuple(
+            sorted(
+                {
+                    row["decree_resolution"][:72]
+                    for row in rows
+                    if _when(row).date().isoformat() == day and row["decree_resolution"]
+                }
+            )
+        )
+    annotations = []
+    previous_decrees = decrees_by_date[dates[0]]
+    for index, day in enumerate(dates[1:], start=1):
+        current_decrees = decrees_by_date[day]
+        if current_decrees and current_decrees != previous_decrees:
+            annotations.append({"index": index, "text": " / ".join(current_decrees)[:96]})
+        previous_decrees = current_decrees
 
     metrics = {(row["product"], row["price_type"]): row for row in store.price_metrics()}
     references = []
@@ -130,10 +145,12 @@ def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | 
                 {
                     "label": label,
                     "color": _color(label),
-                    "min": f"{float(metric['historical_min']):.3f}",
-                    "max": f"{float(metric['historical_max']):.3f}",
+                    "min": float(metric["historical_min"]),
+                    "max": float(metric["historical_max"]),
                 }
             )
+    if len(references) != len(grouped):
+        references = []
 
     newest = max(confirmed_rows, key=lambda row: row["verified_at"] or row["observed_at"])
     verified = datetime.fromisoformat((newest["verified_at"] or newest["observed_at"]).replace("Z", "+00:00"))
@@ -142,17 +159,27 @@ def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | 
     latest_values = [ds["values"][-1] for ds in datasets if ds["values"][-1] is not None]
     insight = "Último periodo confirmado; las líneas punteadas identifican datos pendientes."
     if latest_values:
-        insight = f"Precio vigente más alto: ${max(latest_values):.3f}/galón. Consulte cada producto antes de publicar."
+        prefix = "Precio vigente más alto" if len(dates) == 1 else "Último precio más alto del historial"
+        insight = f"{prefix}: ${max(latest_values):.3f}/galón. Consulte cada producto antes de publicar."
     type_label = {"PUBLICO": "precio al público", "TERMINAL": "precio en terminal", "REFERENCIAL": "precio referencial"}[selected_type]
+    period_count = len(dates)
+    if period_count == 1:
+        title = "Precio vigente de combustible en Ecuador"
+        period_description = f"Vigente desde {datetime.fromisoformat(dates[0]):%d/%m/%Y}"
+    else:
+        title = "Histórico de precios de combustible en Ecuador"
+        period_description = (
+            f"{period_count} periodos oficiales · "
+            f"{datetime.fromisoformat(dates[0]):%d/%m/%Y}–{datetime.fromisoformat(dates[-1]):%d/%m/%Y}"
+        )
     return {
-        "title": "Precios de combustible en Ecuador",
-        "subtitle": f"Últimos cuatro periodos · {type_label} · USD por galón",
+        "title": title,
+        "subtitle": f"{period_description} · {type_label} · USD por galón",
         "labels": [datetime.fromisoformat(day).strftime("%d/%m/%Y") for day in dates],
         "datasets": datasets,
         "annotations": annotations,
         "references": references,
         "stepped": True,
-        "decimals": 3,
         "insight": insight,
         "source": f"Fuente: {sources} · Verificado: {verified:%d/%m/%Y %H:%M} ECT",
         "credit": own_data_label(),
@@ -172,7 +199,6 @@ def generate_historical_dashboard(store: Store, destination: Path) -> Path | Non
     payload = build_national_payload(store, range_limit=None)
     if payload is None:
         return None
-    payload["title"] = "Histórico de precios de combustible en Ecuador"
-    payload["subtitle"] = payload["subtitle"].replace("Últimos cuatro periodos", "Histórico completo")
+    payload["title"] = "Histórico completo de precios de combustible en Ecuador"
     return render_chart(payload, destination)
 
