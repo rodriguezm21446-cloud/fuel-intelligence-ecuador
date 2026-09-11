@@ -13,6 +13,11 @@ test("detecta temas de combustible sin depender de acentos", () => {
   assert.equal(isRelevant("Resultados del campeonato"), false);
 });
 
+test("detecta titulares internacionales de inventarios y refinación", () => {
+  assert.equal(isRelevant("U.S. gasoline inventories fall after refinery outage"), true);
+  assert.equal(isRelevant("New smartphone enters the market"), false);
+});
+
 test("acepta solo los PDF mensuales de precios del histórico de Petroecuador", () => {
   assert.equal(
     isRelevantCandidate(
