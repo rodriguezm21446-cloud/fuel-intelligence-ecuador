@@ -72,14 +72,31 @@ const annotationPlugin = {{
   afterDatasetsDraw(chart) {{
     const ctx = chart.ctx, area = chart.chartArea;
     ctx.save(); ctx.font = '600 13px Inter, Arial, sans-serif';
+    const endpoints = [];
     chart.data.datasets.forEach((ds, index) => {{
       const meta = chart.getDatasetMeta(index); let last = -1;
       ds.data.forEach((value, i) => {{ if (value !== null && value !== undefined) last = i; }});
       if (last >= 0 && meta.data[last]) {{
         const point = meta.data[last]; ctx.fillStyle = ds.borderColor; ctx.beginPath(); ctx.arc(point.x, point.y, 3.5, 0, Math.PI * 2); ctx.fill();
-        ctx.textAlign = 'right'; ctx.fillText(`${{ds.label}} ${{formatMoney(ds.data[last])}}`, area.right - 6, point.y - 9);
+        endpoints.push({{ point, color: ds.borderColor, text: `${{ds.label}} ${{formatMoney(ds.data[last])}}` }});
       }}
     }});
+    // Resolve endpoint-label collisions and keep labels away from mirrored Y ticks.
+    endpoints.sort((a, b) => a.point.y - b.point.y);
+    const minimumGap = 24;
+    let previousY = area.top - minimumGap;
+    for (const endpoint of endpoints) {{
+      endpoint.labelY = Math.max(endpoint.point.y - 14, previousY + minimumGap);
+      previousY = endpoint.labelY;
+    }}
+    if (endpoints.length && endpoints[endpoints.length - 1].labelY > area.bottom - 8) {{
+      const shift = endpoints[endpoints.length - 1].labelY - (area.bottom - 8);
+      for (const endpoint of endpoints) endpoint.labelY -= shift;
+    }}
+    for (const endpoint of endpoints) {{
+      ctx.fillStyle = endpoint.color; ctx.textAlign = 'right';
+      ctx.fillText(endpoint.text, endpoint.point.x - 76, endpoint.labelY);
+    }}
     ctx.font = '600 11px Inter, Arial, sans-serif'; ctx.fillStyle = '#a7adb4';
     for (const note of (P.annotations || [])) {{
       const x = chart.scales.x.getPixelForValue(note.index);
@@ -141,4 +158,3 @@ def render_chart(payload: dict, destination: Path) -> Path:
         if last_error is not None:
             raise RuntimeError("No se pudo cargar Chart.js desde los CDN permitidos") from last_error
     return destination
-

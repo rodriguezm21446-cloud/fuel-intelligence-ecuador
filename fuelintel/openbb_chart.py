@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import hashlib
+import json
 import math
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -71,19 +73,24 @@ def build_market_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict
     verified = datetime.now(timezone.utc).astimezone(ZoneInfo("America/Guayaquil"))
     return {
         "title": "Petróleo: WTI y Brent",
-        "subtitle": "Últimos seis meses · cierres semanales reales, sin suavizado",
+        "subtitle": "Últimos seis meses · cierres semanales observados · USD por barril",
         "labels": [datetime.fromisoformat(day).strftime("%d/%m/%Y") for day in labels],
         "datasets": datasets,
         "annotations": [],
         "references": references,
         "stepped": False,
         "insight": insight,
-        "source": f"Fuente: OpenBB Platform · Proveedor: Yahoo Finance · Verificado: {verified:%d/%m/%Y %H:%M} ECT",
+        "source": f"Fuente: OpenBB Platform · Proveedor: Yahoo Finance · Verificado: {verified:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)",
         "credit": own_data_label(),
     }
 
 
 def generate_openbb_market_chart(destination: Path) -> Path | None:
+    chart, _ = generate_openbb_market_chart_result(destination)
+    return chart
+
+
+def generate_openbb_market_chart_result(destination: Path) -> tuple[Path | None, str | None]:
     raw_series: dict[str, list[tuple[str, float]]] = {}
     for name, symbols in {"WTI": ("CL", "CL=F"), "Brent": ("BZ", "BZ=F")}.items():
         for symbol in symbols:
@@ -95,5 +102,15 @@ def generate_openbb_market_chart(destination: Path) -> Path | None:
             except Exception:
                 continue
     payload = build_market_payload(raw_series)
-    return render_chart(payload, destination) if payload else None
-
+    if not payload:
+        return None, None
+    stable_payload = {
+        "labels": payload["labels"],
+        "datasets": payload["datasets"],
+        "references": payload["references"],
+        "insight": payload["insight"],
+    }
+    signature = hashlib.sha256(
+        json.dumps(stable_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return render_chart(payload, destination), signature

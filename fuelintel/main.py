@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from .ai import GeminiEditor
 from .charts import generate_dashboard, generate_historical_dashboard
-from .openbb_chart import generate_openbb_market_chart
+from .openbb_chart import generate_openbb_market_chart_result
 from .config import Settings, load_sources
 from .pipeline import Pipeline
 from .sources import HttpClient, SourcePoller
@@ -108,19 +108,20 @@ def dashboard(settings: Settings) -> int:
     if generated:
         signature = hashlib.sha256(generated.read_bytes()).hexdigest()
         if signature != store.get_meta("last_national_chart_signature"):
-            notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M}")
+            notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)")
             store.set_meta("last_national_chart_signature", signature)
     try:
-        market = generate_openbb_market_chart(settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png")
+        market, market_signature = generate_openbb_market_chart_result(
+            settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png"
+        )
     except Exception as error:
         store.record_chart_error("WF_06_CHART_GENERATOR", f"mercado: {type(error).__name__}: {error}")
         LOG.exception("WF_08_ERROR_MONITOR registró el fallo del gráfico de mercado")
         market = None
     if market:
-        signature = hashlib.sha256(market.read_bytes()).hexdigest()
-        if signature != store.get_meta("last_openbb_chart_signature"):
-            notifier.send_photo(market, f"Mercado: petróleo Brent y WTI — {now_local:%d/%m/%Y %H:%M}")
-            store.set_meta("last_openbb_chart_signature", signature)
+        if market_signature != store.get_meta("last_openbb_chart_signature"):
+            notifier.send_photo(market, f"Mercado: petróleo Brent y WTI — {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)")
+            store.set_meta("last_openbb_chart_signature", market_signature or "")
         store.set_meta("last_openbb_chart_error", "")
     elif store.get_meta("last_openbb_chart_error") != "sin_datos":
         notifier.send_text("ALERTA TÉCNICA: OpenBB no entregó datos suficientes. El gráfico no se publicó y se reintentará en 5 horas.")
@@ -147,7 +148,7 @@ def historical_dashboard(settings: Settings) -> int:
         LOG.warning("no hay datos confirmados para el histórico")
         return 2
     store.record_pipeline_stage("WF_06_CHART_GENERATOR", "completed", str(generated))
-    return 0 if notifier.send_photo(generated, f"Histórico de combustibles · {now_local:%d/%m/%Y %H:%M}") else 1
+    return 0 if notifier.send_photo(generated, f"Histórico de combustibles · {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)") else 1
 
 
 def health(settings: Settings) -> int:
@@ -223,7 +224,10 @@ def run_forever(settings: Settings) -> int:
             try:
                 generated = generate_dashboard(store, output, local_now)
                 if generated:
-                    notifier.send_photo(generated, f"Resumen nacional de combustibles — {local_now:%d/%m/%Y %H:%M}")
+                    signature = hashlib.sha256(generated.read_bytes()).hexdigest()
+                    if signature != store.get_meta("last_national_chart_signature"):
+                        notifier.send_photo(generated, f"Resumen nacional de combustibles — {local_now:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)")
+                        store.set_meta("last_national_chart_signature", signature)
                     store.set_meta("last_dashboard_at", utc_now.isoformat())
             except Exception:
                 LOG.exception("falló el gráfico programado")
@@ -272,4 +276,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

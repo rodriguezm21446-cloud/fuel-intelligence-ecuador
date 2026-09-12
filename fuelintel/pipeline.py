@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -9,7 +9,7 @@ from .ai import GeminiEditor
 from .calculations import price_change
 from .extractors import extract_effective_period, extract_fuel_prices
 from .filters import evaluate_candidate, relevance_score
-from .formatting import compose_x_prices, format_news_alert, format_price_alert
+from .formatting import compose_x_prices, format_news_alert, format_price_alert, format_unconfirmed_price_alert
 from .models import Candidate, Decision, PriceType, VerificationStatus
 from .sources import SourcePoller
 from .storage import Store
@@ -53,6 +53,7 @@ class Pipeline:
             candidate = self.poller.enrich(candidate)
 
         local_now = candidate.detected_at.astimezone(self.timezone)
+        sent_local = datetime.now(timezone.utc).astimezone(self.timezone)
         period = extract_effective_period(candidate.body or candidate.summary, local_now.date())
         prices = extract_fuel_prices(
             candidate.body or candidate.summary,
@@ -93,11 +94,18 @@ class Pipeline:
                 decision.reasons + ("precios sin periodo de vigencia verificable",),
                 decision.relevance_score,
             )
-        elif prices and period and not period.contains(local_now.date()):
+        elif prices and period and period.end < local_now.date():
             decision = Decision(
                 VerificationStatus.STALE,
                 0,
                 decision.reasons + ("los precios no están vigentes hoy",),
+                decision.relevance_score,
+            )
+        elif prices and period and period.start > local_now.date() and (period.start - local_now.date()).days > 2:
+            decision = Decision(
+                VerificationStatus.PENDING,
+                min(decision.confidence, 55),
+                decision.reasons + ("el periodo empieza con más de 48 horas de anticipación; requiere revisión",),
                 decision.relevance_score,
             )
 
@@ -143,12 +151,22 @@ class Pipeline:
 
         item_id = self.store.save_item(candidate, decision)
         if decision.status != VerificationStatus.VERIFIED:
+            early_warning_sent = False
             if prices and decision.status == VerificationStatus.PENDING:
+                prices = [replace(item, verification_status="PENDING") for item in prices]
                 for item in prices:
                     self.store.save_price(item)
                     if item.source_conflict:
                         self.store.mark_source_conflict(item)
-            return ProcessResult(decision.status, False, item_id, "; ".join(decision.reasons))
+                # Relevant price reports must wake the operator even when the
+                # primary PDF is missing. The wording explicitly blocks publication.
+                if allow_notify and 75 <= candidate.source.trust < 90 and initial_score >= 5:
+                    early_warning_sent = self.notifier.send_text(
+                        format_unconfirmed_price_alert(candidate, prices, local_now, decision.reasons, sent_local)
+                    )
+            if early_warning_sent:
+                self.store.mark_notified(item_id)
+            return ProcessResult(decision.status, early_warning_sent, item_id, "; ".join(decision.reasons))
 
         notified = False
         if prices:
@@ -162,6 +180,7 @@ class Pipeline:
                 self.store.save_price(item)
             if not allow_notify:
                 return ProcessResult(decision.status, False, item_id, "línea base vigente guardada sin notificar")
+            chart = None
             if self.chart_generator:
                 chart_path = Path(self.store.path).parent / "charts" / f"fuel-{local_now:%Y%m%d-%H%M%S}.png"
                 try:
@@ -171,24 +190,39 @@ class Pipeline:
                     self.store.record_pipeline_stage("WF_06_CHART_GENERATOR", "completed", str(chart))
                 except Exception as error:
                     self.store.record_chart_error("WF_06_CHART_GENERATOR", f"{type(error).__name__}: {error}")
-                    return ProcessResult(decision.status, False, item_id, "WF_08_ERROR_MONITOR registró un fallo del gráfico")
-                if not self.notifier.send_photo(chart, f"Precios de combustible en Ecuador · {local_now:%d/%m/%Y %H:%M}"):
-                    self.store.record_chart_error("WF_06_CHART_GENERATOR", "Telegram no confirmó la imagen")
-                    return ProcessResult(decision.status, False, item_id, "Telegram no confirmó el gráfico")
+                    chart = None
             fallback = format_price_alert(candidate, prices, changes, local_now)
             editorial = self.editor.review(fallback, compose_x_prices(prices, changes)) if self.editor else None
-            message = format_price_alert(candidate, prices, changes, local_now, editorial)
+            message = format_price_alert(candidate, prices, changes, local_now, editorial, sent_local)
+            # A confirmed price alert is visual-first: chart, then context,
+            # then the original official PDF as its own Telegram document.
+            if chart is not None:
+                photo_sent = self.notifier.send_photo(
+                    chart,
+                    f"Precios de combustible en Ecuador · {sent_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)",
+                )
+                if not photo_sent:
+                    self.store.record_chart_error("WF_06_CHART_GENERATOR", "Telegram no confirmó la imagen")
             notified = self.notifier.send_text(message)
+            if candidate.raw_kind == "pdf" or candidate.url.lower().split("?", 1)[0].endswith(".pdf"):
+                try:
+                    self.notifier.send_document_url(
+                        candidate.url,
+                        "Documento oficial original · revisa el periodo, producto, unidad y tipo de precio.",
+                    )
+                except Exception as error:
+                    self.store.record_pipeline_stage(
+                        "WF_08_ERROR_MONITOR", "document_error", f"{type(error).__name__}: {error}"
+                    )
         else:
             if not allow_notify:
                 return ProcessResult(decision.status, False, item_id, "línea base guardada sin notificar")
-            fallback = format_news_alert(candidate, local_now, corroborated)
+            fallback = format_news_alert(candidate, local_now, corroborated, sent_local=sent_local)
             fallback_x = fallback.split("TEXTO PARA X:\n", 1)[-1].split("\n\nFuente:", 1)[0]
             editorial = self.editor.review(fallback, fallback_x) if self.editor else None
-            message = format_news_alert(candidate, local_now, corroborated, editorial)
+            message = format_news_alert(candidate, local_now, corroborated, editorial, sent_local)
             notified = self.notifier.send_text(message)
 
         if notified:
             self.store.mark_notified(item_id)
         return ProcessResult(decision.status, notified, item_id, "verificada")
-

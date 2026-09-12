@@ -58,3 +58,17 @@ class TelegramNotifier:
             raise RuntimeError(f"Telegram rechazó el gráfico: {result}")
         return True
 
+    def send_document_url(self, url: str, caption: str) -> bool:
+        """Send Telegram the original remote document without downloading a copy."""
+        if not self.enabled:
+            print(f"[modo seguro] documento oficial: {url}")
+            return False
+        payload = urllib.parse.urlencode(
+            {"chat_id": self.chat_id, "document": url, "caption": caption}
+        ).encode("utf-8")
+        request = urllib.request.Request(f"{self.api_base}/sendDocument", data=payload)
+        with urllib.request.urlopen(request, timeout=60) as response:
+            result = json.loads(response.read())
+        if not result.get("ok"):
+            raise RuntimeError(f"Telegram rechazó el documento: {result}")
+        return True
