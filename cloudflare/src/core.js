@@ -29,6 +29,17 @@ export function isRelevant(title = "", summary = "") {
   return TOPIC_WORDS.some((word) => text.includes(word));
 }
 
+export function isMarketSquawkSignal(sourceId, title = "", summary = "") {
+  if (!["cnbc-energy-rss", "cnbc-finance-rss"].includes(sourceId)) return false;
+  const text = normalizeText(`${title} ${summary}`);
+  const market = ["oil", "crude", "brent", "wti", "gasoline", "diesel", "refinery", "rbob", "ulsd"]
+    .some((word) => text.includes(word));
+  const event = ["surge", "jump", "rise", "fall", "drop", "attack", "outage", "shutdown", "pipeline",
+    "sanction", "inventory", "shortage", "opec", "supply", "disruption"]
+    .some((word) => text.includes(word));
+  return market && event;
+}
+
 export function isRelevantCandidate(sourceId, title = "", summary = "", url = "") {
   if (sourceId === "petroecuador-historico") {
     return /\/ESTRUCTURA-DE-PRECIOS[^/]*\.pdf(?:$|\?)/i.test(url);
@@ -122,4 +133,3 @@ export async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", data);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
-

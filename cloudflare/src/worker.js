@@ -42,6 +42,18 @@ function isDomesticPriceSignal(source, raw) {
   return hasFuel && hasPriceEvent;
 }
 
+function isMarketSquawkSignal(source, raw) {
+  const fastSources = new Set(["cnbc-energy-rss", "cnbc-finance-rss"]);
+  if (!fastSources.has(source.id)) return false;
+  const text = normalizeText(`${raw.title} ${raw.summary}`);
+  const market = ["oil", "crude", "brent", "wti", "gasoline", "diesel", "refinery", "rbob", "ulsd"]
+    .some((word) => text.includes(word));
+  const event = ["surge", "jump", "rise", "fall", "drop", "attack", "outage", "shutdown", "pipeline",
+    "sanction", "inventory", "shortage", "opec", "supply", "disruption"]
+    .some((word) => text.includes(word));
+  return market && event;
+}
+
 function canonicalUrl(value, base) {
   try {
     const url = new URL(value, base);
@@ -130,6 +142,9 @@ const SOURCES = [
   { id: "ecuavisa-economia", name: "Ecuavisa - Economía", url: "https://www.ecuavisa.com/economia", kind: "links", trust: 75, pollSeconds: 60 },
   { id: "opec-press", name: "OPEP - Comunicados", url: "https://www.opec.org/", kind: "links", trust: 95, pollSeconds: 300 },
   { id: "cnbc-finance-rss", name: "CNBC - Finance RSS", url: "https://www.cnbc.com/id/10000664/device/rss/rss.html", kind: "rss", trust: 82, pollSeconds: 60 },
+  { id: "cnbc-energy-rss", name: "CNBC - Energy RSS", url: "https://www.cnbc.com/id/19836768/device/rss/rss.html", kind: "rss", trust: 82, pollSeconds: 60 },
+  { id: "eia-today-energy-rss", name: "EIA - Today in Energy RSS", url: "https://www.eia.gov/rss/todayinenergy.xml", kind: "rss", trust: 100, pollSeconds: 300 },
+  { id: "eia-gasoline-diesel-rss", name: "EIA - Gasoline and Diesel Fuel Update RSS", url: "https://www.eia.gov/petroleum/gasdiesel/includes/gas_diesel_rss.xml", kind: "rss", trust: 100, pollSeconds: 300 },
   { id: "eia-weekly-petroleum", name: "EIA - Weekly Petroleum Status Report", url: "https://www.eia.gov/petroleum/supply/weekly/", kind: "html", trust: 100, pollSeconds: 300 }
 ];
 
@@ -192,7 +207,7 @@ async function saveCandidate(env, source, raw, bootstrap, detectedAt) {
     if (match) corroboratedBy = match.source_name;
     // Dispatch domestic price reports immediately as unconfirmed warnings.
     // Python still blocks publication until ARCH or Petroecuador agrees.
-    if (!match && !isDomesticPriceSignal(source, raw)) return;
+    if (!match && !isDomesticPriceSignal(source, raw) && !isMarketSquawkSignal(source, raw)) return;
   }
 
   const candidate = { source, ...raw, detectedAt };
