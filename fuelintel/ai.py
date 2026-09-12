@@ -11,7 +11,9 @@ from .text import collapse_spaces, trim_x
 EDITORIAL_GUARDRAILS = (
     "No presentes correlación como causalidad. Una variación de WTI o Brent no demuestra por sí sola "
     "que cambiará el precio al consumidor en Ecuador. Solo afirma una subida, bajada o causa nacional "
-    "cuando la evidencia incluya el documento oficial aplicable. Separa hechos, cálculos propios y contexto."
+    "cuando la evidencia incluya el documento oficial aplicable. No atribuyas un movimiento a un ataque, "
+    "oleoducto, sanción, inventario o decisión de la OPEP si esa causa no aparece explícitamente en la evidencia. "
+    "Separa hechos, cálculos propios y contexto."
 )
 
 
@@ -44,7 +46,9 @@ class GeminiEditor:
         prompt = (
             "Eres editor de inteligencia de combustibles de Ecuador. Usa únicamente la evidencia. "
             "No inventes cifras, fechas, causas, predicciones ni fuentes. Declara contradicciones o "
-            "documentos oficiales pendientes. Escribe sin emojis. El análisis tendrá máximo 700 "
+            "documentos oficiales pendientes. Explica primero qué pasó, luego la causa respaldada y finalmente "
+            "el posible canal hacia Ecuador; si falta una causa comprobada, dilo literalmente. Escribe sin emojis. "
+            "El análisis tendrá máximo 700 "
             f"caracteres y el texto para X máximo 280. {EDITORIAL_GUARDRAILS}\n\n"
             f"EVIDENCIA VERIFICADA:\n{evidence[:12000]}\n\n"
             f"BORRADOR SEGURO PARA X:\n{fallback_x}\n\n"
@@ -100,4 +104,3 @@ class GeminiEditor:
         except (KeyError, IndexError, TypeError, ValueError, TimeoutError, urllib.error.URLError) as error:
             self.last_error = f"{type(error).__name__}: {error}"[:500]
             return None
-

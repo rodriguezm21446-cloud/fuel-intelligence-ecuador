@@ -108,15 +108,28 @@ def format_news_alert(
     time_lines = [f"Detectado: {format_ecuador_time(detected_local)}"]
     if sent_local is not None:
         time_lines.append(f"Enviado: {format_ecuador_time(sent_local)}")
+    impact = market_impact_channel(candidate)
+    analysis = editorial.analysis if editorial else (
+        "La fuente confirma el hecho descrito, pero no aporta evidencia suficiente para atribuirle por sí sola "
+        "todo el movimiento del precio."
+    )
     return "\n".join(
         [
-            "CONFIRMADO — NOTICIA DE COMBUSTIBLES",
+            "SQUAWK CONFIRMADO — MERCADO DE COMBUSTIBLES",
             *time_lines,
             f"Verificación: {confirmation}",
             "",
+            "HECHO:",
             candidate.title,
+            "",
+            "DATOS PUBLICADOS:",
             excerpt or "La fuente no proporcionó un resumen; revisa el enlace original.",
-            *(("", f"ANÁLISIS: {editorial.analysis}") if editorial else ()),
+            "",
+            "QUÉ ESTÁ PASANDO:",
+            analysis,
+            "",
+            "CANAL HACIA ECUADOR:",
+            impact,
             *((f"Dudas declaradas: {editorial.doubts}",) if editorial and editorial.doubts else ()),
             "",
             "TEXTO PARA X:",
@@ -126,6 +139,66 @@ def format_news_alert(
             candidate.url,
         ]
     )
+
+
+def market_impact_channel(candidate: Candidate) -> str:
+    """Explain the transmission channel without claiming a price forecast."""
+    text = collapse_spaces(f"{candidate.title} {candidate.summary} {candidate.body}").lower()
+    if any(term in text for term in ("refiner", "gasoline", "rbob", "diesel", "ulsd", "destil")):
+        return (
+            "Puede afectar referencias de gasolina o diésel importado y costos de abastecimiento. "
+            "No demuestra por sí solo un cambio del precio regulado en Ecuador."
+        )
+    if any(term in text for term in ("inventar", "stock", "existenc", "reserv")):
+        return (
+            "Un cambio de inventarios puede presionar las cotizaciones internacionales; el efecto local depende "
+            "del periodo de cálculo, importaciones, flete y fórmula oficial."
+        )
+    if any(term in text for term in ("brent", "wti", "crude", "crudo", "opec", "opep", "pipeline", "oleoduct")):
+        return (
+            "Es una señal de costo aguas arriba. Para trasladarla a Ecuador todavía deben comprobarse derivados, "
+            "flete, ventana temporal y decisión oficial."
+        )
+    return (
+        "Se mantiene como contexto de mercado. No hay evidencia suficiente para calcular un cambio del precio "
+        "ecuatoriano a partir de esta noticia solamente."
+    )
+
+
+def format_unconfirmed_news_squawk(
+    candidate: Candidate,
+    detected_local: datetime,
+    sent_local: datetime | None = None,
+) -> str:
+    """Fast, clearly labelled single-source alert for a potentially material event."""
+    excerpt = collapse_spaces(candidate.summary or candidate.body)[:700].rstrip()
+    lines = [
+        "SQUAWK TEMPRANO — UNA SOLA FUENTE",
+        f"Detectado: {format_ecuador_time(detected_local)}",
+    ]
+    if sent_local is not None:
+        lines.append(f"Enviado: {format_ecuador_time(sent_local)}")
+    lines.extend(
+        [
+            "",
+            "HECHO REPORTADO:",
+            candidate.title,
+            "",
+            "DATOS DISPONIBLES:",
+            excerpt or "La fuente no publicó un resumen verificable; revisa el enlace.",
+            "",
+            "ESTADO DE LA CAUSA:",
+            "Aún no corroborada de forma independiente. No tratar correlación como causalidad.",
+            "",
+            "CANAL HACIA ECUADOR:",
+            market_impact_channel(candidate),
+            "",
+            "Uso editorial: contexto y vigilancia; no publicar como hecho confirmado ni como predicción.",
+            f"Fuente única: {candidate.source.name}",
+            candidate.url,
+        ]
+    )
+    return "\n".join(lines)
 
 
 def format_unconfirmed_price_alert(

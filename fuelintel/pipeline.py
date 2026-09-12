@@ -9,7 +9,13 @@ from .ai import GeminiEditor
 from .calculations import price_change
 from .extractors import extract_effective_period, extract_fuel_prices
 from .filters import evaluate_candidate, relevance_score
-from .formatting import compose_x_prices, format_news_alert, format_price_alert, format_unconfirmed_price_alert
+from .formatting import (
+    compose_x_prices,
+    format_news_alert,
+    format_price_alert,
+    format_unconfirmed_news_squawk,
+    format_unconfirmed_price_alert,
+)
 from .models import Candidate, Decision, PriceType, VerificationStatus
 from .sources import SourcePoller
 from .storage import Store
@@ -164,6 +170,15 @@ class Pipeline:
                     early_warning_sent = self.notifier.send_text(
                         format_unconfirmed_price_alert(candidate, prices, local_now, decision.reasons, sent_local)
                     )
+            elif (
+                allow_notify
+                and candidate.raw_kind in {"link", "rss"}
+                and 80 <= candidate.source.trust < 90
+                and initial_score >= 12
+            ):
+                early_warning_sent = self.notifier.send_text(
+                    format_unconfirmed_news_squawk(candidate, local_now, sent_local)
+                )
             if early_warning_sent:
                 self.store.mark_notified(item_id)
             return ProcessResult(decision.status, early_warning_sent, item_id, "; ".join(decision.reasons))

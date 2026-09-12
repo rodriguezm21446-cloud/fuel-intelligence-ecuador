@@ -37,6 +37,68 @@ def _weekly_closes(rows: list[tuple[str, float]]) -> list[tuple[str, float]]:
     return list(weeks.values())
 
 
+def _change(rows: list[tuple[str, float]], sessions: int) -> float | None:
+    if len(rows) <= sessions or rows[-1][1] <= 0 or rows[-1 - sessions][1] <= 0:
+        return None
+    return (rows[-1][1] / rows[-1 - sessions][1] - 1) * 100
+
+
+def build_market_briefing(raw_series: dict[str, list[tuple[str, float]]]) -> str:
+    """Transparent directional signal; deliberately not a fake calibrated probability."""
+    labels = {
+        "WTI": "WTI (USD/barril)",
+        "Brent": "Brent (USD/barril)",
+        "RBOB": "Gasolina RBOB (USD/galón)",
+        "ULSD": "Diésel/ULSD (USD/galón)",
+    }
+    lines = ["LECTURA CUANTITATIVA — MERCADO DE COMBUSTIBLES", "", "DATOS OBSERVADOS:"]
+    signals: list[tuple[float, float]] = []
+    weights = {"WTI": 0.10, "Brent": 0.20, "RBOB": 0.35, "ULSD": 0.35}
+    for name in ("WTI", "Brent", "RBOB", "ULSD"):
+        rows = raw_series.get(name, [])
+        if not rows:
+            continue
+        week = _change(rows, 5)
+        month = _change(rows, 20)
+        if week is not None:
+            signals.append((max(-15.0, min(15.0, week)), weights[name]))
+        week_text = "n/d" if week is None else f"{week:+.2f}%"
+        month_text = "n/d" if month is None else f"{month:+.2f}%"
+        lines.append(f"{labels[name]}: {rows[-1][1]:.2f} · 1 semana {week_text} · 1 mes {month_text}")
+
+    if signals:
+        weight_sum = sum(weight for _, weight in signals)
+        score = sum(value * weight for value, weight in signals) / weight_sum
+        if score >= 2:
+            direction = "presión alcista"
+        elif score <= -2:
+            direction = "presión bajista"
+        else:
+            direction = "presión mixta o neutral"
+        lines.extend(
+            [
+                "",
+                "PREDICCIÓN EXPERIMENTAL:",
+                f"El conjunto de referencias muestra {direction} a corto plazo (índice direccional {score:+.2f}).",
+                "Esto no es una probabilidad calibrada ni una predicción del precio oficial de Ecuador.",
+            ]
+        )
+    else:
+        lines.extend(["", "PREDICCIÓN EXPERIMENTAL:", "Datos insuficientes; no se emite señal."])
+    lines.extend(
+        [
+            "",
+            "CAUSA:",
+            "No puede inferirse únicamente del gráfico. Se añadirá desde noticias corroboradas y fuentes primarias.",
+            "",
+            "CANAL HACIA ECUADOR:",
+            "Debe confirmarse con derivados, flete, ventana de cálculo y documento oficial de ARCH/Petroecuador.",
+            "Hora de Ecuador (UTC−5).",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def build_market_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict | None:
     if not raw_series:
         return None
@@ -86,13 +148,19 @@ def build_market_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict
 
 
 def generate_openbb_market_chart(destination: Path) -> Path | None:
-    chart, _ = generate_openbb_market_chart_result(destination)
+    chart, _, _ = generate_openbb_market_chart_result(destination)
     return chart
 
 
-def generate_openbb_market_chart_result(destination: Path) -> tuple[Path | None, str | None]:
+def generate_openbb_market_chart_result(destination: Path) -> tuple[Path | None, str | None, str | None]:
     raw_series: dict[str, list[tuple[str, float]]] = {}
-    for name, symbols in {"WTI": ("CL", "CL=F"), "Brent": ("BZ", "BZ=F")}.items():
+    symbols_by_name = {
+        "WTI": ("CL", "CL=F"),
+        "Brent": ("BZ", "BZ=F"),
+        "RBOB": ("RB", "RB=F"),
+        "ULSD": ("HO", "HO=F"),
+    }
+    for name, symbols in symbols_by_name.items():
         for symbol in symbols:
             try:
                 rows = _history(symbol)
@@ -101,16 +169,18 @@ def generate_openbb_market_chart_result(destination: Path) -> tuple[Path | None,
                     break
             except Exception:
                 continue
-    payload = build_market_payload(raw_series)
+    payload = build_market_payload({key: value for key, value in raw_series.items() if key in {"WTI", "Brent"}})
     if not payload:
-        return None, None
+        return None, None, None
+    briefing = build_market_briefing(raw_series)
     stable_payload = {
         "labels": payload["labels"],
         "datasets": payload["datasets"],
         "references": payload["references"],
         "insight": payload["insight"],
+        "briefing": briefing,
     }
     signature = hashlib.sha256(
         json.dumps(stable_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
-    return render_chart(payload, destination), signature
+    return render_chart(payload, destination), signature, briefing

@@ -111,7 +111,7 @@ def dashboard(settings: Settings) -> int:
             notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)")
             store.set_meta("last_national_chart_signature", signature)
     try:
-        market, market_signature = generate_openbb_market_chart_result(
+        market, market_signature, market_briefing = generate_openbb_market_chart_result(
             settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png"
         )
     except Exception as error:
@@ -121,6 +121,8 @@ def dashboard(settings: Settings) -> int:
     if market:
         if market_signature != store.get_meta("last_openbb_chart_signature"):
             notifier.send_photo(market, f"Mercado: petróleo Brent y WTI — {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)")
+            if market_briefing:
+                notifier.send_text(market_briefing)
             store.set_meta("last_openbb_chart_signature", market_signature or "")
         store.set_meta("last_openbb_chart_error", "")
     elif store.get_meta("last_openbb_chart_error") != "sin_datos":
