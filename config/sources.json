@@ -58,7 +58,7 @@
     "critical": true,
     "poll_seconds": 60,
     "idle_poll_seconds": 300,
-    "burst_days": [8, 9, 10, 11, 12],
+    "burst_days": [8, 9, 10, 11, 12, 13],
     "max_age_hours": 744
   },
   {
@@ -71,7 +71,7 @@
     "critical": true,
     "poll_seconds": 60,
     "idle_poll_seconds": 300,
-    "burst_days": [8, 9, 10, 11, 12],
+    "burst_days": [8, 9, 10, 11, 12, 13],
     "max_age_hours": 744
   },
   {
@@ -135,6 +135,42 @@
     "max_age_hours": 18
   },
   {
+    "id": "cnbc-energy-rss",
+    "name": "CNBC - Energy RSS",
+    "url": "https://www.cnbc.com/id/19836768/device/rss/rss.html",
+    "kind": "rss",
+    "trust": 82,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 18
+  },
+  {
+    "id": "eia-today-energy-rss",
+    "name": "EIA - Today in Energy RSS",
+    "url": "https://www.eia.gov/rss/todayinenergy.xml",
+    "kind": "rss",
+    "trust": 100,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 300,
+    "idle_poll_seconds": 900,
+    "max_age_hours": 168
+  },
+  {
+    "id": "eia-gasoline-diesel-rss",
+    "name": "EIA - Gasoline and Diesel Fuel Update RSS",
+    "url": "https://www.eia.gov/petroleum/gasdiesel/includes/gas_diesel_rss.xml",
+    "kind": "rss",
+    "trust": 100,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 300,
+    "idle_poll_seconds": 1800,
+    "max_age_hours": 192
+  },
+  {
     "id": "eia-weekly-petroleum",
     "name": "EIA - Weekly Petroleum Status Report",
     "url": "https://www.eia.gov/petroleum/supply/weekly/",
@@ -147,4 +183,3 @@
     "max_age_hours": 192
   }
 ]
-
