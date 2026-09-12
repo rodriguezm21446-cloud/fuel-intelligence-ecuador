@@ -51,6 +51,7 @@ jobs:
     timeout-minutes: 15
     env:
       FUELINTEL_DATA_DIR: data/runtime
+      FUELINTEL_TIMEZONE: America/Guayaquil
       FUELINTEL_DRY_RUN: "false"
       FUELINTEL_TELEGRAM_ENABLED: "true"
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -124,23 +125,17 @@ jobs:
           print("Gemini respondió correctamente; texto para X dentro del límite:", len(result.x_text))
           PY
 
-      - name: Generate and send OpenBB test chart
+      - name: Validate OpenBB chart generation
         if: github.event_name == 'push'
         run: |
           python - <<'PY'
-          import os
           from pathlib import Path
           from fuelintel.openbb_chart import generate_openbb_market_chart
-          from fuelintel.telegram import TelegramNotifier
 
           chart = generate_openbb_market_chart(Path("data/runtime/charts/openbb-test.png"))
           if chart is None:
               raise SystemExit("OpenBB no entregó una serie verificable")
-          sent = TelegramNotifier(
-              os.environ["TELEGRAM_BOT_TOKEN"], os.environ["TELEGRAM_CHAT_ID"], True, False
-          ).send_photo(chart, "PRUEBA VISUAL — WTI y Brent. Diseño editorial generado con Python y datos obtenidos mediante OpenBB.")
-          if not sent:
-              raise SystemExit("Telegram no confirmó el gráfico OpenBB")
+          print("Gráfico OpenBB validado sin enviar mensajes de prueba a Telegram:", chart)
           PY
 
       - name: Save analysis memory
@@ -149,4 +144,3 @@ jobs:
         with:
           path: data/runtime
           key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
-
