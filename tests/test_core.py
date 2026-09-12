@@ -9,7 +9,12 @@ from pathlib import Path
 from fuelintel.calculations import price_change, validate_price
 from fuelintel.extractors import extract_effective_period, extract_fuel_prices
 from fuelintel.filters import evaluate_candidate
-from fuelintel.formatting import compose_x_prices
+from fuelintel.formatting import (
+    compose_x_prices,
+    format_ecuador_time,
+    format_news_alert,
+    format_unconfirmed_news_squawk,
+)
 from fuelintel.models import Candidate, FuelPrice, SourceSpec, VerificationStatus
 from fuelintel.pipeline import Pipeline
 from fuelintel.storage import Store
@@ -160,6 +165,39 @@ class FormattingTests(unittest.TestCase):
         changes = {item.product: price_change(item.price, item.price) for item in prices}
         self.assertLessEqual(len(compose_x_prices(prices, changes)), 280)
 
+    def test_every_alert_identifies_ecuador_time_and_delivery_time(self):
+        local = datetime(2026, 9, 11, 9, 15, tzinfo=timezone(timedelta(hours=-5)))
+        self.assertEqual(
+            format_ecuador_time(local),
+            "11/09/2026 09:15:00 — hora de Ecuador (UTC−5)",
+        )
+        candidate = Candidate(
+            source=OFFICIAL,
+            title="Nuevo precio del diésel",
+            url="https://example.test/noticia",
+            summary="El precio cambia desde el 12 de septiembre.",
+        )
+        message = format_news_alert(candidate, local, False, sent_local=local + timedelta(hours=2))
+        self.assertIn("Detectado: 11/09/2026 09:15:00 — hora de Ecuador (UTC−5)", message)
+        self.assertIn("Enviado: 11/09/2026 11:15:00 — hora de Ecuador (UTC−5)", message)
+
+    def test_single_source_squawk_never_claims_a_confirmed_cause(self):
+        local = datetime(2026, 9, 11, 9, 15, tzinfo=timezone(timedelta(hours=-5)))
+        source = SourceSpec(
+            id="cnbc-energy-rss", name="CNBC - Energy RSS", url="https://example.test/rss",
+            kind="rss", trust=82, country="INTL"
+        )
+        candidate = Candidate(
+            source=source,
+            title="Oil rises after a refinery outage",
+            url="https://example.test/oil",
+            summary="Brent rose while traders assessed the reported refinery outage.",
+        )
+        message = format_unconfirmed_news_squawk(candidate, local, local)
+        self.assertIn("UNA SOLA FUENTE", message)
+        self.assertIn("Aún no corroborada", message)
+        self.assertIn("CANAL HACIA ECUADOR", message)
+
 
 class _NoEnrichment:
     def enrich(self, candidate):
@@ -169,13 +207,76 @@ class _NoEnrichment:
 class _CaptureNotifier:
     def __init__(self):
         self.messages = []
+        self.events = []
 
     def send_text(self, message):
         self.messages.append(message)
+        self.events.append(("text", message))
+        return True
+
+    def send_photo(self, path, caption):
+        self.events.append(("photo", caption))
+        return True
+
+    def send_document_url(self, url, caption):
+        self.events.append(("document", url))
         return True
 
 
 class PipelineSafetyTests(unittest.TestCase):
+    def test_high_impact_international_story_sends_early_squawk(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            notifier = _CaptureNotifier()
+            source = SourceSpec(
+                id="cnbc-energy-rss", name="CNBC - Energy RSS", url="https://example.test/rss",
+                kind="rss", trust=82, country="INTL", max_age_hours=18
+            )
+            pipeline = Pipeline(store, _NoEnrichment(), notifier, timezone.utc)
+            candidate = Candidate(
+                source=source,
+                title="Brent oil surges after pipeline outage threatens supply",
+                url="https://example.test/brent",
+                summary="Crude oil supply faces a reported disruption.",
+                published_at=NOW,
+                detected_at=NOW,
+                content_hash="international-squawk",
+                raw_kind="rss",
+            )
+            result = pipeline.process(candidate)
+            self.assertEqual(result.status, VerificationStatus.PENDING)
+            self.assertTrue(result.notified)
+            self.assertIn("SQUAWK TEMPRANO", notifier.messages[0])
+
+    def test_domestic_price_report_wakes_operator_but_is_not_official(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            notifier = _CaptureNotifier()
+            news = SourceSpec(
+                id="primicias-economia",
+                name="Primicias - Economía",
+                url="https://example.test/economia",
+                kind="html_links",
+                trust=75,
+                country="EC",
+                max_age_hours=36,
+            )
+            pipeline = Pipeline(store, _NoEnrichment(), notifier, timezone.utc)
+            candidate = Candidate(
+                source=news,
+                title="Cambian los precios de gasolina Extra y diésel en Ecuador",
+                url="https://example.test/nuevo-precio",
+                body="Precios del 12 de septiembre al 11 de octubre de 2026. Extra $3.21 Diésel Premium $3.15",
+                published_at=datetime(2026, 9, 11, 20, 0, tzinfo=timezone.utc),
+                detected_at=datetime(2026, 9, 11, 20, 1, tzinfo=timezone.utc),
+                content_hash="early-price-news",
+            )
+            result = pipeline.process(candidate)
+            self.assertEqual(result.status, VerificationStatus.PENDING)
+            self.assertTrue(result.notified)
+            self.assertIn("TODAVÍA NO CONFIRMADO", notifier.messages[0])
+            self.assertIn("no publicar todavía", notifier.messages[0])
+
     def test_expired_price_is_never_sent_or_saved_as_current(self):
         with tempfile.TemporaryDirectory() as folder:
             store = Store(Path(folder) / "db.sqlite3")
@@ -215,6 +316,72 @@ class PipelineSafetyTests(unittest.TestCase):
             self.assertEqual(repeated.status, VerificationStatus.DUPLICATE)
             self.assertEqual(len(notifier.messages), 1)
 
+    def test_tomorrows_official_period_is_sent_when_pdf_appears_today(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            notifier = _CaptureNotifier()
+            pipeline = Pipeline(store, _NoEnrichment(), notifier, timezone.utc)
+            candidate = Candidate(
+                source=OFFICIAL,
+                title="Precios oficiales desde el 12 de septiembre",
+                url="https://example.test/precios-septiembre.pdf",
+                body="Precios del 12 de septiembre al 11 de octubre de 2026. Extra $3.21",
+                detected_at=datetime(2026, 9, 11, 15, 0, tzinfo=timezone.utc),
+                content_hash="next-period-price",
+            )
+            result = pipeline.process(candidate)
+            self.assertEqual(result.status, VerificationStatus.VERIFIED)
+            self.assertEqual(len(notifier.messages), 1)
+            self.assertIn("PRÓXIMO PERIODO", notifier.messages[0])
+            self.assertEqual([kind for kind, _ in notifier.events], ["text", "document"])
+
+    def test_confirmed_price_sends_chart_before_context_and_pdf(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            store = Store(root / "db.sqlite3")
+            notifier = _CaptureNotifier()
+            chart_path = root / "chart.png"
+            chart_path.write_bytes(b"png")
+            pipeline = Pipeline(
+                store,
+                _NoEnrichment(),
+                notifier,
+                timezone.utc,
+                chart_generator=lambda *_: chart_path,
+            )
+            candidate = Candidate(
+                source=OFFICIAL,
+                title="Precios oficiales desde el 12 de septiembre",
+                url="https://example.test/precios-septiembre.pdf",
+                body="Precios del 12 de septiembre al 11 de octubre de 2026. Extra $3.21",
+                detected_at=datetime(2026, 9, 11, 15, 0, tzinfo=timezone.utc),
+                content_hash="visual-first-price",
+                raw_kind="pdf",
+            )
+            result = pipeline.process(candidate)
+            self.assertEqual(result.status, VerificationStatus.VERIFIED)
+            self.assertEqual([kind for kind, _ in notifier.events], ["photo", "text", "document"])
+
+    def test_far_future_official_period_is_held_for_review(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            notifier = _CaptureNotifier()
+            pipeline = Pipeline(store, _NoEnrichment(), notifier, timezone.utc)
+            candidate = Candidate(
+                source=OFFICIAL,
+                title="Supuestos precios futuros",
+                url="https://example.test/futuro.pdf",
+                body="Precios del 12 de octubre al 11 de noviembre de 2026. Extra $9.99",
+                detected_at=datetime(2026, 9, 11, 15, 0, tzinfo=timezone.utc),
+                content_hash="far-future-price",
+            )
+            result = pipeline.process(candidate)
+            self.assertEqual(result.status, VerificationStatus.PENDING)
+            self.assertEqual(notifier.messages, [])
+            saved = store.recent_prices()
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(saved[0]["verification_status"], "PENDING")
+
     def test_bootstrap_saves_current_price_without_notification(self):
         with tempfile.TemporaryDirectory() as folder:
             store = Store(Path(folder) / "db.sqlite3")
@@ -248,4 +415,3 @@ class TelegramSetupTests(unittest.TestCase):
             latest_private_chat(updates),
             {"id": 123, "type": "private", "first_name": "Ana"},
         )
-

@@ -10,6 +10,7 @@ class GeminiTests(unittest.TestCase):
     def test_guardrail_rejects_automatic_brent_causality(self):
         self.assertIn("no demuestra por sí sola", EDITORIAL_GUARDRAILS)
         self.assertIn("documento oficial", EDITORIAL_GUARDRAILS)
+        self.assertIn("oleoducto", EDITORIAL_GUARDRAILS)
 
     def test_is_disabled_without_secret(self):
         editor = GeminiEditor("", "gemini-3.5-flash-lite")
@@ -25,4 +26,3 @@ class GeminiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

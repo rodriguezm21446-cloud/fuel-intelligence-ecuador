@@ -10,11 +10,18 @@ from pathlib import Path
 from fuelintel.chart_renderer import build_chart_html
 from fuelintel.charts import build_national_payload, choose_chart_kind, generate_dashboard, own_data_label
 from fuelintel.models import EffectivePeriod, FuelPrice, PriceType
-from fuelintel.openbb_chart import _weekly_closes, build_market_payload
+from fuelintel.openbb_chart import _weekly_closes, build_market_briefing, build_market_payload
 from fuelintel.storage import Store
 
 
 class ChartTests(unittest.TestCase):
+    def test_market_briefing_labels_prediction_as_experimental(self):
+        rows = [(f"2026-08-{day:02d}", 70.0 + day / 10) for day in range(1, 22)]
+        message = build_market_briefing({"WTI": rows, "Brent": rows, "RBOB": rows, "ULSD": rows})
+        self.assertIn("PREDICCIÓN EXPERIMENTAL", message)
+        self.assertIn("no es una probabilidad calibrada", message)
+        self.assertIn("CAUSA:", message)
+
     def test_chart_kind_is_selected_from_the_data(self):
         self.assertEqual(choose_chart_kind("official_period_price", 5), "step")
         self.assertEqual(choose_chart_kind("market_price", 50, has_ohlc=True), "candlestick")
@@ -68,4 +75,3 @@ class ChartTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
