@@ -29,6 +29,19 @@ function isRelevantCandidate(source, raw) {
   return isRelevant(raw.title, raw.summary);
 }
 
+function isDomesticPriceSignal(source, raw) {
+  const domestic = new Set([
+    "eluniverso-economia-rss", "primicias-economia", "ecuavisa-economia"
+  ]);
+  if (!domestic.has(source.id)) return false;
+  const text = normalizeText(`${raw.title} ${raw.summary}`);
+  const hasFuel = ["gasolina", "ecopais", "extra", "super", "diesel", "combustible"]
+    .some((word) => text.includes(word));
+  const hasPriceEvent = ["precio", "sube", "baja", "aumento", "incremento", "reduccion", "vigencia"]
+    .some((word) => text.includes(word));
+  return hasFuel && hasPriceEvent;
+}
+
 function canonicalUrl(value, base) {
   try {
     const url = new URL(value, base);
@@ -176,8 +189,10 @@ async function saveCandidate(env, source, raw, bootstrap, detectedAt) {
        ORDER BY detected_at DESC LIMIT 30`
     ).bind(source.id).all();
     const match = (recent.results || []).find((item) => titleOverlap(raw.title, item.title) >= 0.5);
-    if (!match) return;
-    corroboratedBy = match.source_name;
+    if (match) corroboratedBy = match.source_name;
+    // Dispatch domestic price reports immediately as unconfirmed warnings.
+    // Python still blocks publication until ARCH or Petroecuador agrees.
+    if (!match && !isDomesticPriceSignal(source, raw)) return;
   }
 
   const candidate = { source, ...raw, detectedAt };
@@ -269,4 +284,3 @@ export default {
     });
   }
 };
-
