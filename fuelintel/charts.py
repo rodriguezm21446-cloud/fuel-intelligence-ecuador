@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from .chart_renderer import render_chart
 from .storage import Store
+from .models import FuelPrice
 
 
 WIDTH, HEIGHT = 3200, 1800
@@ -152,6 +153,15 @@ def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | 
     if len(references) != len(grouped):
         references = []
 
+    # Los precios oficiales usan una lámina clara; Súper cambia a carbón para
+    # conservar contraste. Los colores del mercado permanecen en tema oscuro.
+    for dataset in datasets:
+        if dataset["label"] == "Súper":
+            dataset["color"] = "#303030"
+    for reference in references:
+        if reference["label"] == "Súper":
+            reference["color"] = "#303030"
+
     newest = max(confirmed_rows, key=lambda row: row["verified_at"] or row["observed_at"])
     verified = datetime.fromisoformat((newest["verified_at"] or newest["observed_at"]).replace("Z", "+00:00"))
     verified = verified.astimezone(ZoneInfo("America/Guayaquil"))
@@ -181,8 +191,9 @@ def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | 
         "references": references,
         "stepped": True,
         "insight": insight,
-        "source": f"Fuente: {sources} · Verificado: {verified:%d/%m/%Y %H:%M} ECT",
+        "source": f"Fuente: {sources} · Verificado: {verified:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)",
         "credit": own_data_label(),
+        "theme": "light",
     }
 
 
@@ -202,3 +213,47 @@ def generate_historical_dashboard(store: Store, destination: Path) -> Path | Non
     payload["title"] = "Histórico completo de precios de combustible en Ecuador"
     return render_chart(payload, destination)
 
+
+def generate_reported_price_chart(
+    store: Store,
+    prices: list[FuelPrice],
+    source_name: str,
+    destination: Path,
+    now_local: datetime,
+) -> Path | None:
+    """Render a clearly provisional media report without changing official history."""
+    allowed = {"Extra", "Ecopaís", "Diésel Premium", "Súper"}
+    by_product = {item.product: item for item in prices if item.product in allowed}
+    if not by_product:
+        return None
+    if by_product.get("Extra") and by_product.get("Ecopaís") and by_product["Extra"].price == by_product["Ecopaís"].price:
+        by_product["Extra/Ecopaís"] = by_product.pop("Extra")
+        by_product.pop("Ecopaís")
+    datasets = []
+    for product, item in sorted(by_product.items()):
+        previous_product = "Extra" if product == "Extra/Ecopaís" else product
+        previous = store.previous_price(previous_product, item.period.start.isoformat() if item.period else None)
+        label = "Diésel" if product.startswith("Diésel") else product
+        datasets.append({
+            "label": label,
+            "color": "#303030" if label == "Súper" else _color(label),
+            "values": [float(previous) if previous is not None else None, float(item.price)],
+            "pending": True,
+        })
+    period = next((item.period for item in by_product.values() if item.period), None)
+    validity = f" · posible vigencia {period.start:%d/%m/%Y}–{period.end:%d/%m/%Y}" if period else ""
+    payload = {
+        "title": "Reporte preliminar de precios de combustible",
+        "subtitle": f"Información publicada por un medio{validity} · USD por galón",
+        "labels": ["Anterior confirmado", "Reporte reciente"],
+        "datasets": datasets,
+        "annotations": [],
+        "references": [],
+        "stepped": False,
+        "insight": "Pendiente de confirmación oficial. No incorporar al histórico ni publicar como precio oficial.",
+        "source": f"Fuente reportada: {source_name} · Detectado: {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)",
+        "credit": own_data_label(),
+        "theme": "light",
+        "displayDecimals": 3,
+    }
+    return render_chart(payload, destination)

@@ -88,3 +88,14 @@ def load_sources(path: Path) -> list[SourceSpec]:
         raise ValueError("Hay identificadores de fuentes duplicados")
     return [source for source in sources if source.enabled]
 
+
+def load_x_sources(path: Path) -> dict[str, SourceSpec]:
+    """Sources dispatched by the optional X adapter, never polled as HTML."""
+    if not path.exists():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {item["source_id"]: SourceSpec(
+        id=item["source_id"], name=f"X · @{item['username']}",
+        url=f"https://x.com/{item['username']}", kind="x", trust=item["trust"],
+        country=item["country"], max_age_hours=24
+    ) for item in raw["accounts"]}

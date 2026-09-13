@@ -1,0 +1,11 @@
+{
+  "enabled_by_default": false,
+  "activation": "FUELINTEL_X_ENABLED=true y X_BEARER_TOKEN en Cloudflare; requiere acceso de lectura de pago en X",
+  "accounts": [
+    {"username": "DanielNoboaOk", "source_id": "x-daniel-noboa", "country": "EC", "trust": 95, "purpose": "Anuncios presidenciales sobre combustibles y decretos relacionados"},
+    {"username": "EPPetroecuador", "source_id": "x-petroecuador", "country": "EC", "trust": 95, "purpose": "Precios, abastecimiento, importaciones, refinerías y terminales"},
+    {"username": "business", "source_id": "x-bloomberg", "country": "INTL", "trust": 85, "purpose": "Petróleo, derivados y transporte marítimo con posible impacto sobre Ecuador"}
+  ],
+  "max_requests_per_hour": 6,
+  "note": "El límite de consultas no garantiza un coste monetario: controlar además el presupuesto en X. No se convierte la web de X en un RSS ficticio."
+}

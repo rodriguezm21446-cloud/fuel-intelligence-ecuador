@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from .ai import GeminiEditor
 from .charts import generate_dashboard, generate_historical_dashboard
-from .openbb_chart import generate_openbb_market_chart_result
+from .openbb_chart import generate_openbb_market_bundle
 from .config import Settings, load_sources
 from .pipeline import Pipeline
 from .sources import HttpClient, SourcePoller
@@ -111,24 +111,48 @@ def dashboard(settings: Settings) -> int:
             notifier.send_photo(generated, f"Resumen nacional de combustibles — {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)")
             store.set_meta("last_national_chart_signature", signature)
     try:
-        market, market_signature, market_briefing = generate_openbb_market_chart_result(
-            settings.data_dir / "charts" / f"openbb-market-{now_local:%Y%m%d-%H%M}.png"
+        related_news = store.recent_notified_market_news(now=datetime.now(timezone.utc), hours=36, limit=2)
+        market_artifacts, market_briefing = generate_openbb_market_bundle(
+            settings.data_dir / "charts" / "market-close",
+            related_news=related_news,
+            warehouse_path=settings.data_dir / "market-history.duckdb",
         )
     except Exception as error:
         store.record_chart_error("WF_06_CHART_GENERATOR", f"mercado: {type(error).__name__}: {error}")
         LOG.exception("WF_08_ERROR_MONITOR registró el fallo del gráfico de mercado")
-        market = None
-    if market:
-        if market_signature != store.get_meta("last_openbb_chart_signature"):
-            notifier.send_photo(market, f"Mercado: petróleo Brent y WTI — {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)")
-            if market_briefing:
-                notifier.send_text(market_briefing)
-            store.set_meta("last_openbb_chart_signature", market_signature or "")
+        market_artifacts = []
+        market_briefing = None
+    if market_artifacts:
+        changed = []
+        close_label = "Cierre semanal" if now_local.weekday() == 4 else "Cierre diario"
+        for key, market_path, market_signature in market_artifacts:
+            signature_key = f"last_openbb_{key}_signature"
+            if market_signature != store.get_meta(signature_key):
+                changed.append((key, market_path, market_signature))
+        # A diario se prioriza el gráfico con transmisión más directa a
+        # combustibles. El viernes se entrega el paquete completo semanal.
+        if now_local.weekday() != 4 and changed:
+            preferred = next((item for item in changed if item[0] == "products"), changed[0])
+            changed = [preferred]
+        for key, market_path, market_signature in changed:
+            captions = {
+                "crude": "WTI y Brent",
+                "products": "Gasolina RBOB y diésel ULSD",
+                "volatility": "Volatilidad realizada WTI y Brent",
+                "heatmap": "Mapa de calor de combustibles",
+            }
+            notifier.send_photo(
+                market_path,
+                f"{close_label}: {captions[key]} — {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)",
+            )
+            store.set_meta(f"last_openbb_{key}_signature", market_signature)
+        if changed and market_briefing:
+            notifier.send_text(market_briefing)
         store.set_meta("last_openbb_chart_error", "")
     elif store.get_meta("last_openbb_chart_error") != "sin_datos":
-        notifier.send_text("ALERTA TÉCNICA: OpenBB no entregó datos suficientes. El gráfico no se publicó y se reintentará en 5 horas.")
+        notifier.send_text("ALERTA TÉCNICA: no llegaron datos de mercado suficientes. El gráfico no se publicó y se reintentará en la próxima ejecución programada.")
         store.set_meta("last_openbb_chart_error", "sin_datos")
-    if generated is None and market is None:
+    if generated is None and not market_artifacts:
         LOG.warning("no hubo datos suficientes para crear gráficos")
         return 2
     store.set_meta("last_dashboard_at", datetime.now(timezone.utc).isoformat())

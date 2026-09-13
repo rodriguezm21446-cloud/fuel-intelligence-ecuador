@@ -4,7 +4,9 @@ const TOPIC_WORDS = [
   "petroleo", "crudo", "brent", "wti", "opep", "opec", "refineria",
   "subsidio", "hidrocarburo", "derivados", "petroecuador", "arch",
   "gasoline", "diesel fuel", "crude oil", "refinery", "refining", "inventory",
-  "inventories", "shortage", "outage", "volatility", "rbob", "ulsd"
+  "inventories", "shortage", "outage", "volatility", "rbob", "ulsd", "oil",
+  "pipeline", "tanker", "vessel", "shipping", "maritime", "hormuz", "bab al-mandab",
+  "نفط", "الخام", "بنزين", "ديزل", "مصفاة", "هرمز", "ناقلة", "أوبك"
 ];
 const TRACKING_KEYS = new Set([
   "fbclid", "gclid", "mc_cid", "mc_eid", "utm_campaign", "utm_content",
@@ -19,7 +21,22 @@ function normalizeText(value = "") {
 
 function isRelevant(title = "", summary = "") {
   const text = normalizeText(`${title} ${summary}`);
-  return TOPIC_WORDS.some((word) => text.includes(word));
+  return TOPIC_WORDS.some((word) => ["extra", "super", "arch", "oil"].includes(word)
+    ? new RegExp(`(^|[^a-z0-9])${word}([^a-z0-9]|$)`).test(text)
+    : text.includes(word));
+}
+
+function freshness(publishedAt, detectedAt, hours = 24) {
+  if (!publishedAt) return "unknown";
+  const age = Date.parse(detectedAt) - Date.parse(publishedAt);
+  if (!Number.isFinite(age)) return "unknown";
+  if (age < -10 * 60_000) return "future";
+  return age > hours * 3600_000 ? "stale" : "fresh";
+}
+
+function nextPollSeconds(source, state) {
+  const errors = Math.min(6, Math.max(0, Number(state?.error_count || 0)));
+  return Math.min(3600, (source.pollSeconds || 60) * (2 ** errors));
 }
 
 function isRelevantCandidate(source, raw) {
@@ -31,7 +48,10 @@ function isRelevantCandidate(source, raw) {
 
 function isDomesticPriceSignal(source, raw) {
   const domestic = new Set([
-    "eluniverso-economia-rss", "primicias-economia", "ecuavisa-economia"
+    "eluniverso-economia-rss", "primicias-economia", "ecuavisa-economia", "elcomercio-rss",
+    "expreso-economia", "lahora-economia", "teleamazonas-economia", "eltelegrafo-economia",
+    "google-news-ecuador-combustibles"
+    ,"x-daniel-noboa", "x-petroecuador"
   ]);
   if (!domestic.has(source.id)) return false;
   const text = normalizeText(`${raw.title} ${raw.summary}`);
@@ -43,15 +63,73 @@ function isDomesticPriceSignal(source, raw) {
 }
 
 function isMarketSquawkSignal(source, raw) {
-  const fastSources = new Set(["cnbc-energy-rss", "cnbc-finance-rss"]);
+  const fastSources = new Set([
+    "cnbc-energy-rss", "cnbc-finance-rss", "telegram-aja-news",
+    "telegram-walter-bloomberg", "ukmto-maritime-security", "x-bloomberg"
+  ]);
   if (!fastSources.has(source.id)) return false;
   const text = normalizeText(`${raw.title} ${raw.summary}`);
-  const market = ["oil", "crude", "brent", "wti", "gasoline", "diesel", "refinery", "rbob", "ulsd"]
+  const market = ["oil", "crude", "brent", "wti", "gasoline", "diesel", "refinery", "rbob", "ulsd",
+    "pipeline", "tanker", "vessel", "shipping", "maritime", "hormuz", "bab al-mandab",
+    "نفط", "الخام", "بنزين", "ديزل", "مصفاة", "هرمز", "ناقلة"]
     .some((word) => text.includes(word));
   const event = ["surge", "jump", "rise", "fall", "drop", "attack", "outage", "shutdown", "pipeline",
-    "sanction", "inventory", "shortage", "opec", "supply", "disruption"]
+    "sanction", "inventory", "shortage", "opec", "supply", "disruption",
+    "ارتفاع", "انخفاض", "هبوط", "هجوم", "تعطل", "إغلاق", "عقوبات", "إمدادات"]
     .some((word) => text.includes(word));
   return market && event;
+}
+
+function isOfficialFuelSource(source) {
+  return new Set([
+    "arch-precios", "arch-biblioteca", "presidencia-decretos",
+    "petroecuador-precios", "petroecuador-historico"
+  ]).has(source.id);
+}
+
+function escapeHtml(value = "") {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+async function sendFastTelegramAlarm(env, candidate, alarmKind) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+    return { ok: false, waiting: true, error: "Telegram directo aún no configurado" };
+  }
+  const heading = alarmKind === "domestic"
+    ? "Alerta Ecuador — precio reportado por un medio"
+    : alarmKind === "official"
+      ? "Alerta Ecuador — nueva publicación oficial detectada"
+      : "Alerta internacional — posible impacto en combustibles";
+  const qualification = alarmKind === "domestic"
+    ? "Dato preliminar: todavía no está confirmado como precio oficial."
+    : alarmKind === "market"
+      ? "El efecto sobre Ecuador aún no está demostrado."
+      : "El análisis verificará vigencia, producto y cifras.";
+  const ecuadorTime = new Intl.DateTimeFormat("es-EC", {
+    timeZone: "America/Guayaquil", dateStyle: "short", timeStyle: "medium", hour12: false
+  }).format(new Date(candidate.detectedAt));
+  const message = [
+    `<b>${escapeHtml(heading)}</b>`,
+    escapeHtml(candidate.title.slice(0, 500)),
+    `<b>Fuente:</b> ${escapeHtml(candidate.source.name)}`,
+    escapeHtml(qualification),
+    `<a href="${escapeHtml(candidate.url)}">Abrir publicación</a>`,
+    `<b>Detectado:</b> ${escapeHtml(ecuadorTime)} — hora de Ecuador (UTC−5)`
+  ].join("\n\n");
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    signal: AbortSignal.timeout(8000),
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: env.TELEGRAM_CHAT_ID,
+      text: message,
+      parse_mode: "HTML",
+      disable_web_page_preview: true
+    })
+  });
+  if (response.ok && (await response.json()).ok === true) return { ok: true, waiting: false, error: "" };
+  return { ok: false, waiting: false, error: `Telegram respondió HTTP ${response.status}` };
 }
 
 function canonicalUrl(value, base) {
@@ -95,7 +173,8 @@ function extractRssCandidates(xml, baseUrl) {
     const hrefMatch = block.match(/<link[^>]+href=["']([^"']+)["']/i);
     const url = canonicalUrl(hrefMatch?.[1] || textLink, baseUrl);
     const summary = tagValue(block, ["description", "summary", "content"]);
-    if (title && url) results.push({ title, url, summary });
+    const publishedAt = rawTagValue(block, ["pubDate", "published", "updated", "dc:date"]);
+    if (title && url) results.push({ title, url, summary, publishedAt });
   }
   return results;
 }
@@ -105,12 +184,25 @@ function extractLinkCandidates(html, baseUrl) {
   const seen = new Set();
   const anchor = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
-  while ((match = anchor.exec(html)) && results.length < 100) {
+  while ((match = anchor.exec(html)) && results.length < 2000) {
     const title = normalizeText(match[2]);
     const url = canonicalUrl(match[1], baseUrl);
     if (!title || !url || seen.has(url) || !/^https?:/i.test(url)) continue;
     seen.add(url);
     results.push({ title, url, summary: "" });
+  }
+  return results;
+}
+
+function extractTelegramCandidates(html) {
+  const results = [];
+  const blocks = html.match(/<div class="tgme_widget_message_wrap[^"]*"[\s\S]*?(?=<div class="tgme_widget_message_wrap|<\/section>|$)/gi) || [];
+  for (const block of blocks.slice(-50)) {
+    const post = block.match(/data-post=["']([^"']+)["']/i)?.[1];
+    const text = block.match(/<div class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/i)?.[1] || "";
+    const title = normalizeText(text);
+    const publishedAt = block.match(/<time[^>]+datetime=["']([^"']+)["']/i)?.[1] || "";
+    if (post && title) results.push({ title: title.slice(0, 500), url: `https://t.me/${post}`, summary: title, publishedAt });
   }
   return results;
 }
@@ -146,12 +238,77 @@ const SOURCES = [
   { id: "eia-today-energy-rss", name: "EIA - Today in Energy RSS", url: "https://www.eia.gov/rss/todayinenergy.xml", kind: "rss", trust: 100, pollSeconds: 300 },
   { id: "eia-gasoline-diesel-rss", name: "EIA - Gasoline and Diesel Fuel Update RSS", url: "https://www.eia.gov/petroleum/gasdiesel/includes/gas_diesel_rss.xml", kind: "rss", trust: 100, pollSeconds: 300 },
   { id: "eia-weekly-petroleum", name: "EIA - Weekly Petroleum Status Report", url: "https://www.eia.gov/petroleum/supply/weekly/", kind: "html", trust: 100, pollSeconds: 300 }
+  ,{ id: "telegram-aja-news", name: "Al Jazeera Arabic — Telegram oficial", url: "https://t.me/s/AjaNews", kind: "telegram", trust: 85, pollSeconds: 60 }
+  ,{ id: "telegram-walter-bloomberg", name: "Walter Bloomberg — Telegram (agregador)", url: "https://t.me/s/WalterBloomberg", kind: "telegram", trust: 82, pollSeconds: 60 }
+  ,{ id: "google-news-ecuador-combustibles", name: "Google News — combustibles Ecuador (agregador)", url: "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20Petroecuador%29%20Ecuador&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60 }
+  ,{ id: "elcomercio-rss", name: "El Comercio — RSS general", url: "https://www.elcomercio.com/feed/", kind: "rss", trust: 75, pollSeconds: 60 }
+  ,{ id: "expreso-economia", name: "Expreso — Economía y negocios", url: "https://www.expreso.ec/economia-y-negocios/", kind: "links", trust: 75, pollSeconds: 60 }
+  ,{ id: "lahora-economia", name: "La Hora — Economía", url: "https://www.lahora.com.ec/economia/", kind: "links", trust: 72, pollSeconds: 60 }
+  ,{ id: "teleamazonas-economia", name: "Teleamazonas — Economía", url: "https://www.teleamazonas.com/categoria/noticias/economia/", kind: "links", trust: 72, pollSeconds: 60 }
+  ,{ id: "eltelegrafo-economia", name: "El Telégrafo — Economía", url: "https://www.eltelegrafo.com.ec/noticias/economia/44", kind: "links", trust: 72, pollSeconds: 60 }
+  ,{ id: "ukmto-maritime-security", name: "UKMTO — avisos oficiales de seguridad marítima", url: "https://www.ukmto.org/ukmto-products", kind: "links", trust: 95, pollSeconds: 300 }
 ];
 
 const USER_AGENT = "FuelIntelligenceEcuador/0.2 (+verified private monitor)";
 
+const X_ACCOUNTS = [
+  { id: "x-daniel-noboa", username: "DanielNoboaOk", name: "X · @DanielNoboaOk", trust: 95 },
+  { id: "x-petroecuador", username: "EPPetroecuador", name: "X · @EPPetroecuador", trust: 95 },
+  { id: "x-bloomberg", username: "business", name: "X · @business", trust: 85 }
+].map(item => ({...item, url: `https://x.com/${item.username}`, kind: "x"}));
+
+function xPostRelevant(username, text) {
+  const value = normalizeText(text);
+  if (username.toLowerCase() === "business") {
+    return /\b(oil|crude|brent|wti|diesel|gasoline|refinery|tanker|hormuz|ecuador)\b/.test(value);
+  }
+  return /\b(gasolina|ecopais|diesel|combustibles?|petroleo|crudo|petroecuador|refineria|hidrocarburos|oleoducto)\b/.test(value);
+}
+
+async function pollX(env, detectedAt) {
+  // X charges for data access. Activation is explicit; never query by default.
+  if (env.FUELINTEL_X_ENABLED !== "true" || !env.X_BEARER_TOKEN) return;
+  const key = "__x_recent";
+  const state = await env.DB.prepare("SELECT * FROM source_state WHERE source_id = ?").bind(key).first();
+  if (state && Date.parse(detectedAt) - Date.parse(state.checked_at) < 600_000) return;
+  // Reserve the interval before the request, including on failures/rate limits.
+  await env.DB.prepare(`INSERT INTO source_state(source_id, body_hash, checked_at) VALUES (?, '', ?)
+    ON CONFLICT(source_id) DO UPDATE SET checked_at=excluded.checked_at`).bind(key, detectedAt).run();
+  try {
+    const url = new URL("https://api.x.com/2/tweets/search/recent");
+    url.searchParams.set("query", "(from:DanielNoboaOk OR from:EPPetroecuador OR from:business) (gasolina OR diesel OR combustible OR petróleo OR oil OR crude OR refinery OR tanker OR Ecuador) -is:retweet");
+    url.searchParams.set("max_results", "10");
+    url.searchParams.set("tweet.fields", "created_at,author_id");
+    url.searchParams.set("expansions", "author_id");
+    url.searchParams.set("user.fields", "username");
+    if (state?.etag) url.searchParams.set("since_id", state.etag);
+    const response = await fetch(url, {signal: AbortSignal.timeout(12000), headers: {Authorization: `Bearer ${env.X_BEARER_TOKEN}`}});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    if (result.errors?.length) throw new Error("X devolvió resultados incompletos");
+    const users = new Map((result.includes?.users || []).map(user => [user.id, user.username]));
+    for (const post of [...(result.data || [])].reverse()) {
+      const username = users.get(post.author_id);
+      const account = X_ACCOUNTS.find(item => item.username.toLowerCase() === username?.toLowerCase());
+      if (!account || !xPostRelevant(username, post.text)) continue;
+      await saveCandidate(env, account, {
+        title: post.text.slice(0, 500), summary: post.text, url: `https://x.com/${username}/status/${post.id}`,
+        publishedAt: post.created_at
+      }, !state?.body_hash, detectedAt);
+    }
+    // Do not skip unseen pages: hold the cursor and flag saturation for review.
+    if (result.meta?.next_token) throw new Error("X: hay más resultados que el límite; revisar cobertura");
+    await env.DB.prepare("UPDATE source_state SET etag = ?, body_hash = 'initialized', error_count = 0, last_error = NULL WHERE source_id = ?")
+      .bind(result.meta?.newest_id || state?.etag || null, key).run();
+  } catch (error) {
+    await env.DB.prepare("UPDATE source_state SET error_count = error_count + 1, last_error = ? WHERE source_id = ?")
+      .bind(`X: ${error?.message?.startsWith("HTTP") ? error.message : "lectura incompleta o conexión fallida"}`, key).run();
+  }
+}
+
 function discover(source, body, finalUrl) {
   if (source.kind === "rss") return extractRssCandidates(body, finalUrl);
+  if (source.kind === "telegram") return extractTelegramCandidates(body);
   if (source.kind === "links") return extractLinkCandidates(body, finalUrl);
   const title = normalizeText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || source.name);
   return [{ title, url: canonicalUrl(finalUrl, source.url), summary: normalizeText(body).slice(0, 2000) }];
@@ -161,6 +318,7 @@ async function dispatchGithub(env, candidate, corroboratedBy = "") {
   if (!env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY) return { ok: false, waiting: true, error: "GitHub aún no configurado" };
   const workflow = env.GITHUB_WORKFLOW || "cloud-job.yml";
   const response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPOSITORY}/actions/workflows/${workflow}/dispatches`, {
+    signal: AbortSignal.timeout(8000),
     method: "POST",
     headers: {
       "Accept": "application/vnd.github+json",
@@ -178,6 +336,8 @@ async function dispatchGithub(env, candidate, corroboratedBy = "") {
         event_title: candidate.title.slice(0, 500),
         detected_at: candidate.detectedAt,
         corroborated_by: corroboratedBy
+        ,event_summary: candidate.summary?.slice(0, 5000) || ""
+        ,event_published_at: candidate.publishedAt || ""
       }
     })
   });
@@ -187,6 +347,8 @@ async function dispatchGithub(env, candidate, corroboratedBy = "") {
 
 async function saveCandidate(env, source, raw, bootstrap, detectedAt) {
   if (!isRelevantCandidate(source, raw)) return;
+  const current = freshness(raw.publishedAt, detectedAt);
+  if (current === "stale" || current === "future") return;
   const eventKey = await sha256(`${source.id}\n${raw.url}\n${normalizeText(raw.title)}`);
   const status = bootstrap ? "baseline" : (source.trust >= 90 ? "ready" : "pending_corroboration");
   const inserted = await env.DB.prepare(
@@ -200,24 +362,51 @@ async function saveCandidate(env, source, raw, bootstrap, detectedAt) {
   if (source.trust < 90) {
     const recent = await env.DB.prepare(
       `SELECT source_id, source_name, title FROM event_candidates
-       WHERE source_id <> ? AND detected_at >= datetime('now', '-12 hours')
+       WHERE source_id <> ? AND julianday(detected_at) >= julianday('now', '-12 hours')
+         AND status NOT IN ('baseline', 'stale', 'rejected')
        ORDER BY detected_at DESC LIMIT 30`
     ).bind(source.id).all();
-    const match = (recent.results || []).find((item) => titleOverlap(raw.title, item.title) >= 0.5);
+    const matches = (recent.results || []).filter((item) => titleOverlap(raw.title, item.title) >= 0.5);
+    const match = matches[0];
     if (match) corroboratedBy = match.source_name;
     // Dispatch domestic price reports immediately as unconfirmed warnings.
     // Python still blocks publication until ARCH or Petroecuador agrees.
     if (!match && !isDomesticPriceSignal(source, raw) && !isMarketSquawkSignal(source, raw)) return;
+    // First source raises the alarm; a second source corroborates it. Further
+    // copies are stored for audit but do not start more runners or messages.
+    // Different numbers or dates can be corrections, even with similar titles.
+    const numbers = (text) => (text.match(/\d+(?:[.,]\d+)?/g) || []).join("|");
+    if (matches.length >= 2 && matches.every(item => numbers(item.title) === numbers(raw.title))) return;
   }
 
   const candidate = { source, ...raw, detectedAt };
-  const dispatched = await dispatchGithub(env, candidate, corroboratedBy);
+  const alarmKind = isDomesticPriceSignal(source, raw)
+    ? "domestic"
+    : isOfficialFuelSource(source)
+      ? "official"
+      : isMarketSquawkSignal(source, raw)
+        ? "market"
+        : "";
+  // This alarm is deliberately simple and source-attributed. It reaches the
+  // operator before GitHub starts Python/Chromium; the detailed validation and
+  // chart arrive later from the cloud job.
+  const fastAlarm = alarmKind === "domestic" && !corroboratedBy && current === "fresh"
+    ? await sendFastTelegramAlarm(env, candidate, alarmKind).catch(() => ({ ok: false, error: "Telegram: fallo de conexión" }))
+    : { ok: false, waiting: true, error: "" };
+  const dispatched = await dispatchGithub(env, candidate, corroboratedBy)
+    .catch(() => ({ ok: false, error: "GitHub: fallo de conexión" }));
   const nextStatus = dispatched.ok ? "dispatched" : (dispatched.waiting ? "waiting_configuration" : "dispatch_failed");
   await env.DB.prepare(
     `UPDATE event_candidates SET status = ?, dispatch_attempts = dispatch_attempts + 1,
      dispatched_at = CASE WHEN ? = 'dispatched' THEN ? ELSE dispatched_at END, last_error = ?
      WHERE event_key = ?`
-  ).bind(nextStatus, nextStatus, detectedAt, dispatched.error || null, eventKey).run();
+  ).bind(
+    nextStatus,
+    nextStatus,
+    detectedAt,
+    [fastAlarm.waiting ? "" : fastAlarm.error, dispatched.error].filter(Boolean).join("; ") || null,
+    eventKey
+  ).run();
 }
 
 async function pollSource(env, source, state, detectedAt) {
@@ -225,7 +414,7 @@ async function pollSource(env, source, state, detectedAt) {
   if (state?.etag) headers["If-None-Match"] = state.etag;
   if (state?.last_modified) headers["If-Modified-Since"] = state.last_modified;
   try {
-    const response = await fetch(source.url, { headers, redirect: "follow" });
+    const response = await fetch(source.url, { headers, redirect: "follow", signal: AbortSignal.timeout(12000) });
     if (response.status === 304) {
       await env.DB.prepare("UPDATE source_state SET checked_at = ?, error_count = 0, last_error = NULL WHERE source_id = ?").bind(detectedAt, source.id).run();
       return;
@@ -238,7 +427,11 @@ async function pollSource(env, source, state, detectedAt) {
     const bootstrap = !state?.body_hash;
     if (state?.body_hash !== bodyHash) {
       const candidates = discover(source, body, response.url || source.url);
-      for (const candidate of candidates.slice(0, 50)) {
+      if (source.kind !== "html" && candidates.length === 0) throw new Error("Parser no encontró artículos: revisar feed, bloqueo o cambio de página");
+      // Navigation links often occupy the first half of a news page. Filter
+      // before limiting, otherwise a relevant new article can be silently lost.
+      const relevantCandidates = candidates.filter((candidate) => isRelevantCandidate(source, candidate));
+      for (const candidate of relevantCandidates.slice(0, 50)) {
         await saveCandidate(env, source, candidate, bootstrap, detectedAt);
       }
     }
@@ -249,7 +442,7 @@ async function pollSource(env, source, state, detectedAt) {
        body_hash=excluded.body_hash, checked_at=excluded.checked_at, error_count=0, last_error=NULL`
     ).bind(source.id, response.headers.get("etag"), response.headers.get("last-modified"), bodyHash, detectedAt).run();
   } catch (error) {
-    const message = `${error?.name || "Error"}: ${error?.message || String(error)}`.slice(0, 500);
+    const message = `${error?.name || "Error"}: fallo de lectura o procesamiento; revisar la fuente`;
     await env.DB.prepare(
       `INSERT INTO source_state(source_id, body_hash, checked_at, error_count, last_error)
        VALUES (?, '', ?, 1, ?)
@@ -266,9 +459,64 @@ async function pollAll(env) {
   const byId = new Map((states.results || []).map((state) => [state.source_id, state]));
   const due = SOURCES.filter((source) => {
     const checkedAt = Date.parse(byId.get(source.id)?.checked_at || "");
-    return !Number.isFinite(checkedAt) || nowMs - checkedAt >= (source.pollSeconds || 60) * 1000;
+    return !Number.isFinite(checkedAt) || nowMs - checkedAt >= nextPollSeconds(source, byId.get(source.id)) * 1000;
   });
-  await Promise.all(due.map((source) => pollSource(env, source, byId.get(source.id), detectedAt)));
+  // Bound connections and failures so a broken site cannot stall all sources.
+  for (let offset = 0; offset < due.length; offset += 4) {
+    await Promise.allSettled(due.slice(offset, offset + 4).map((source) => pollSource(env, source, byId.get(source.id), detectedAt)));
+  }
+  await retryDispatches(env, detectedAt);
+  await pollX(env, detectedAt);
+  await reportOperationalHealth(env, detectedAt);
+}
+
+async function reportOperationalHealth(env, detectedAt) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
+  const failed = await env.DB.prepare(
+    "SELECT source_id FROM source_state WHERE error_count >= 3 AND source_id NOT LIKE '__monitor%'").all();
+  const backlog = await env.DB.prepare(
+    "SELECT COUNT(*) AS total FROM event_candidates WHERE status = 'dispatch_failed' AND dispatch_attempts >= 4 AND julianday(detected_at) >= julianday('now', '-24 hours')").first();
+  const ids = (failed.results || []).map(row => row.source_id).sort();
+  if (!env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY) ids.push("github-sin-configurar");
+  if (Number(backlog?.total || 0)) ids.push(`envíos-agotados:${backlog.total}`);
+  const fingerprint = ids.join(",") || "healthy";
+  const previous = await env.DB.prepare("SELECT * FROM source_state WHERE source_id = '__monitor_health'").first();
+  if (fingerprint === "healthy" && (!previous || previous.body_hash === "healthy")) return;
+  if (previous?.body_hash === fingerprint && Date.parse(detectedAt) - Date.parse(previous.checked_at) < 6 * 3600_000) return;
+  const message = ids.length
+    ? `Aviso técnico de combustibleEc\nLa vigilancia está incompleta. Revisar: ${ids.join(", ")}.\nLas demás fuentes continúan. No se ha confirmado la entrega de todos los análisis.`
+    : "combustibleEc: las fuentes y los envíos vigilados se han recuperado.";
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST", signal: AbortSignal.timeout(8000), headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: message })
+    });
+    if (!response.ok || !(await response.json()).ok) return;
+    await env.DB.prepare(
+      `INSERT INTO source_state(source_id, body_hash, checked_at) VALUES ('__monitor_health', ?, ?)
+       ON CONFLICT(source_id) DO UPDATE SET body_hash=excluded.body_hash, checked_at=excluded.checked_at`
+    ).bind(fingerprint, detectedAt).run();
+  } catch { /* Do not disclose tokens in fetch exceptions. Retry next tick. */ }
+}
+
+async function retryDispatches(env, detectedAt) {
+  if (!env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY) return;
+  const rows = await env.DB.prepare(
+    `SELECT * FROM event_candidates
+     WHERE status IN ('dispatch_failed', 'waiting_configuration') AND dispatch_attempts < 4
+       AND julianday(detected_at) >= julianday('now', '-24 hours')
+     ORDER BY detected_at ASC LIMIT 3`
+  ).all();
+  for (const row of rows.results || []) {
+    const source = SOURCES.find(item => item.id === row.source_id);
+    if (!source) continue;
+    const result = await dispatchGithub(env, { source, url: row.url, title: row.title, detectedAt: row.detected_at })
+      .catch(() => ({ ok: false, error: "GitHub: fallo de conexión" }));
+    await env.DB.prepare(
+      `UPDATE event_candidates SET status = ?, dispatch_attempts = dispatch_attempts + 1,
+       dispatched_at = ?, last_error = ? WHERE event_key = ?`
+    ).bind(result.ok ? "dispatched" : "dispatch_failed", result.ok ? detectedAt : null, result.error || null, row.event_key).run();
+  }
 }
 
 export default {
@@ -290,9 +538,19 @@ export default {
       "SELECT source_id, checked_at, error_count, last_error FROM source_state ORDER BY source_id"
     ).all();
     const events = await env.DB.prepare("SELECT status, COUNT(*) AS total FROM event_candidates GROUP BY status").all();
+    const states = sources.results || [];
+    const unavailable = SOURCES.filter(source => {
+      const state = states.find(row => row.source_id === source.id);
+      return !state || state.error_count >= 3 || !Number.isFinite(Date.parse(state.checked_at))
+        || Date.now() - Date.parse(state.checked_at) > Math.max(600, source.pollSeconds * 3) * 1000;
+    });
     return Response.json({
       service: "fuelintel-ecuador",
-      status: "ok",
+      status: unavailable.length || !env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY ? "degraded" : "ok",
+      revision: "reliability-2026-09-13",
+      unavailableSources: unavailable.map(source => source.id),
+      directTelegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID),
+      xEnabled: env.FUELINTEL_X_ENABLED === "true" && Boolean(env.X_BEARER_TOKEN),
       githubConfigured: Boolean(env.GITHUB_TOKEN && env.GITHUB_REPOSITORY),
       sources: sources.results || [],
       events: events.results || []

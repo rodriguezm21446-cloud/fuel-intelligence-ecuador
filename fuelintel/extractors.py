@@ -37,6 +37,8 @@ PRODUCT_ALIASES = {
     "premium": "Premium",
     "diesel": "Diésel Premium",
     "diesel premium": "Diésel Premium",
+    "desel": "Diésel Premium",
+    "desel premium": "Diésel Premium",
 }
 
 
@@ -101,6 +103,31 @@ def _decimal(raw: str) -> Decimal | None:
         return Decimal(cleaned)
     except InvalidOperation:
         return None
+
+
+def _last_reported_price(text: str, product_pattern: str, stop_pattern: str) -> Decimal | None:
+    """Read journalistic forms such as 'pasa de USD 3,24 a USD 3,21'."""
+    for match in re.finditer(product_pattern, text):
+        segment = text[match.end():match.end() + 220]
+        stop = re.search(stop_pattern, segment)
+        if stop:
+            segment = segment[:stop.start()]
+        matches = list(re.finditer(r"(?:usd\s*|\$\s*)(\d{1,2}(?:[.,]\d{1,4})?)", segment))
+        if len(matches) == 1:
+            prefix = segment[:matches[0].start()]
+            # Reject descriptions of the old/current price such as
+            # "actualmente ... alrededor de USD 4,64".
+            if "alrededor" in prefix[-60:] or not re.search(
+                r"(?:sube|subira|baja|bajara|pasa|queda|quedara|sera|nuevo precio).{0,55}(?:a|en|de)?\s*$",
+                prefix,
+            ):
+                continue
+        for item in reversed(matches):
+            raw = item.group(1)
+            value = _decimal(raw)
+            if value is not None and validate_price(value)[0]:
+                return value
+    return None
 
 
 def extract_fuel_prices(
@@ -171,6 +198,28 @@ def extract_fuel_prices(
                 PriceType.REFERENCIAL if match.group("kind") == "referencial" else PriceType.PUBLICO
             )
 
+    # Ecuadorian media usually announce a transition instead of a key/value
+    # table. These values remain PENDING later unless ARCH/Petroecuador confirms.
+    reported = {
+        "Extra/Ecopaís": _last_reported_price(
+            normalized, r"\bextra\s+(?:y|/)\s+ecopais\b", r"\b(?:diesel|super)\b"
+        ),
+        "Diésel Premium": _last_reported_price(
+            normalized, r"\b(?:diesel|desel)(?:\s+premium)?\b", r"\b(?:extra|ecopais|super)\b"
+        ),
+        "Súper": _last_reported_price(
+            normalized, r"\b(?:gasolina\s+)?super\b", r"\b(?:extra|ecopais|diesel)\b"
+        ),
+    }
+    if reported["Extra/Ecopaís"] is not None:
+        found["Extra"] = reported["Extra/Ecopaís"]
+        found["Ecopaís"] = reported["Extra/Ecopaís"]
+        product_types["Extra"] = product_types["Ecopaís"] = PriceType.PUBLICO
+    for product in ("Diésel Premium", "Súper"):
+        if reported[product] is not None:
+            found[product] = reported[product]
+            product_types[product] = PriceType.REFERENCIAL if product == "Súper" else PriceType.PUBLICO
+
     return [
         FuelPrice(
             product=product,
@@ -197,4 +246,3 @@ def extract_pdf_text(payload: bytes) -> str:
     for page in reader.pages:
         pages.append(page.extract_text() or "")
     return "\n".join(pages)
-
