@@ -12,6 +12,10 @@ dependencies = [
   "pypdf>=5,<7",
   "openbb>=4.7,<5",
   "openbb-yfinance>=1.6,<2",
+  "yfinance>=0.2,<2",
+  "duckdb>=1.4,<2",
+  "polars>=1.35,<2",
+  "pyarrow>=21,<24",
   "tzdata>=2025.2",
 ]
 
@@ -27,4 +31,3 @@ include = ["fuelintel*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

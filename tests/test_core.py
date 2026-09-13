@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fuelintel.calculations import price_change, validate_price
 from fuelintel.extractors import extract_effective_period, extract_fuel_prices
-from fuelintel.filters import evaluate_candidate
+from fuelintel.filters import evaluate_candidate, relevance_score
 from fuelintel.formatting import (
     compose_x_prices,
     format_ecuador_time,
@@ -19,6 +19,7 @@ from fuelintel.models import Candidate, FuelPrice, SourceSpec, VerificationStatu
 from fuelintel.pipeline import Pipeline
 from fuelintel.storage import Store
 from fuelintel.setup_telegram import latest_private_chat
+from fuelintel.sources import parse_telegram_channel
 from fuelintel.text import canonical_url, title_similarity
 
 
@@ -62,6 +63,28 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(values["Ecopaís"], Decimal("2.40"))
         self.assertEqual(values["Diésel Premium"], Decimal("1.037"))
         self.assertEqual(values["Súper"], Decimal("2.98"))
+
+    def test_extracts_price_transitions_reported_by_ecuador_media(self):
+        text = """
+        Los precios rigen del 12 de septiembre al 11 de octubre de 2026.
+        Las gasolinas Extra y Ecopaís pasan de USD 3,24 a USD 3,21 por galón.
+        El diésel Premium baja de USD 3,18 a USD 3,15.
+        La gasolina Súper subirá a USD 4,89.
+        """
+        prices = extract_fuel_prices(text, "https://medio.example/nota", NOW, date(2026, 9, 11))
+        values = {item.product: item.price for item in prices}
+        self.assertEqual(values["Extra"], Decimal("3.21"))
+        self.assertEqual(values["Ecopaís"], Decimal("3.21"))
+        self.assertEqual(values["Diésel Premium"], Decimal("3.15"))
+        self.assertEqual(values["Súper"], Decimal("4.89"))
+
+    def test_does_not_mistake_old_super_price_for_new_price(self):
+        text = """
+        La gasolina Súper, que actualmente se comercializa en alrededor de USD 4,64,
+        tendrá un incremento de entre 12 y 15 centavos. Extra y Ecopaís bajarán.
+        """
+        prices = extract_fuel_prices(text, "https://medio.example/nota", NOW, date(2026, 9, 11))
+        self.assertNotIn("Súper", {item.product for item in prices})
 
     def test_extracts_only_automotive_terminal_rows_from_official_pdf(self):
         text = """
@@ -403,6 +426,29 @@ class PipelineSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TelegramChannelTests(unittest.TestCase):
+    def test_public_preview_is_split_into_dated_posts(self):
+        source = SourceSpec("telegram-test", "Canal", "https://t.me/s/test", "telegram", 82, country="INTL")
+        payload = b'''<div class="tgme_widget_message_wrap">
+          <div class="tgme_widget_message" data-post="test/42">
+            <div class="tgme_widget_message_text">OIL FALLS<br>AFTER INVENTORY REPORT</div>
+            <time datetime="2026-09-13T10:30:00+00:00"></time>
+          </div>
+        </div>'''
+        posts = parse_telegram_channel(source, payload, NOW)
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0].url, "https://t.me/test/42")
+        self.assertEqual(posts[0].summary, "OIL FALLS AFTER INVENTORY REPORT")
+        self.assertEqual(posts[0].published_at, datetime(2026, 9, 13, 10, 30, tzinfo=timezone.utc))
+
+    def test_energy_alerts_score_in_english_and_arabic(self):
+        source = SourceSpec("telegram-test", "Canal", "https://t.me/s/test", "telegram", 82, country="INTL")
+        english = Candidate(source, "ATTACK ON SAUDI PIPELINE", "https://t.me/test/1")
+        arabic = Candidate(source, "هجوم على ناقلة في مضيق هرمز", "https://t.me/test/2")
+        self.assertGreaterEqual(relevance_score(english), 12)
+        self.assertGreaterEqual(relevance_score(arabic), 12)
 
 
 class TelegramSetupTests(unittest.TestCase):

@@ -113,6 +113,58 @@ class PageParser(HTMLParser):
             self.title = collapse_spaces(f"{self.title} {value}")
 
 
+class TelegramChannelParser(HTMLParser):
+    """Extract individual posts from Telegram's public channel preview."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.posts: list[dict] = []
+        self._post: dict | None = None
+        self._wrap_depth = 0
+        self._text_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        classes = set((values.get("class") or "").split())
+        if "tgme_widget_message_wrap" in classes:
+            self._wrap_depth = 1
+            self._post = {"id": "", "text": [], "published_at": None}
+        elif self._post is not None and tag == "div":
+            self._wrap_depth += 1
+        if self._post is None:
+            return
+        if values.get("data-post"):
+            self._post["id"] = values["data-post"]
+        if "tgme_widget_message_text" in classes:
+            self._text_depth = 1
+        elif self._text_depth and tag == "div":
+            self._text_depth += 1
+        if tag == "time" and values.get("datetime"):
+            self._post["published_at"] = parse_datetime(values["datetime"])
+        if tag == "br" and self._text_depth:
+            self._post["text"].append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._post is None:
+            return
+        if tag != "div":
+            return
+        if self._text_depth:
+            self._text_depth -= 1
+        self._wrap_depth -= 1
+        if self._wrap_depth == 0:
+            if self._post.get("id") and collapse_spaces(" ".join(self._post["text"])):
+                self.posts.append(self._post)
+            self._post = None
+            self._text_depth = 0
+
+    def handle_data(self, data: str) -> None:
+        if self._post is not None and self._text_depth:
+            value = collapse_spaces(data)
+            if value:
+                self._post["text"].append(value)
+
+
 def parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -169,6 +221,26 @@ def parse_rss(source: SourceSpec, payload: bytes, detected_at: datetime) -> list
                 published_at=parse_datetime(date_raw),
                 detected_at=detected_at,
                 raw_kind="rss",
+            )
+        )
+    return candidates
+
+
+def parse_telegram_channel(source: SourceSpec, payload: bytes, detected_at: datetime) -> list[Candidate]:
+    parser = TelegramChannelParser()
+    parser.feed(payload.decode("utf-8", errors="replace"))
+    candidates = []
+    for post in parser.posts[-50:]:
+        message = collapse_spaces(" ".join(post["text"]))
+        candidates.append(
+            Candidate(
+                source=source,
+                title=message[:240],
+                url=f"https://t.me/{post['id']}",
+                summary=message,
+                published_at=post["published_at"],
+                detected_at=detected_at,
+                raw_kind="telegram",
             )
         )
     return candidates
@@ -242,6 +314,8 @@ class SourcePoller:
             content_type = result.content_type.lower()
             if source.kind == "rss" or "xml" in content_type:
                 candidates = parse_rss(source, result.body, detected_at)
+            elif source.kind == "telegram":
+                candidates = parse_telegram_channel(source, result.body, detected_at)
             elif "pdf" in content_type or result.url.lower().endswith(".pdf"):
                 document_text = extract_pdf_text(result.body)
                 candidates = [

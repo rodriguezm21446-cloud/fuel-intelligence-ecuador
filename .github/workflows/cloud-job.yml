@@ -35,6 +35,14 @@ on:
         description: Independent confirming source when required
         required: false
         type: string
+      event_summary:
+        description: Texto de la publicación original cuando proviene de X
+        required: false
+        type: string
+      event_published_at:
+        description: Fecha de publicación original; distinta de detección
+        required: false
+        type: string
   schedule:
     - cron: "17 */5 * * *"
 
@@ -60,14 +68,16 @@ jobs:
       GEMINI_MODEL: gemini-3.5-flash-lite
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      FUELINTEL_AI_REVISION: "7"
-      FUELINTEL_CHART_REVISION: "6"
+      FUELINTEL_AI_REVISION: "8"
+      FUELINTEL_CHART_REVISION: "7"
       FUELINTEL_BRAND_NAME: "@combustibleEc"
       FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
       FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
       FUELINTEL_EVENT_TITLE: ${{ inputs.event_title }}
       FUELINTEL_EVENT_DETECTED_AT: ${{ inputs.detected_at }}
       FUELINTEL_EVENT_CORROBORATED_BY: ${{ inputs.corroborated_by }}
+      FUELINTEL_EVENT_SUMMARY: ${{ inputs.event_summary }}
+      FUELINTEL_EVENT_PUBLISHED_AT: ${{ inputs.event_published_at }}
     steps:
       - name: Checkout private repository
         uses: actions/checkout@v6
@@ -144,3 +154,18 @@ jobs:
         with:
           path: data/runtime
           key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Notify operator when processing fails
+        if: failure()
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os
+          from fuelintel.telegram import TelegramNotifier
+          notifier = TelegramNotifier(os.getenv("TELEGRAM_BOT_TOKEN", ""), os.getenv("TELEGRAM_CHAT_ID", ""), True, False)
+          try:
+              notifier.send_text("Aviso técnico de combustibleEc: falló un análisis. Revisa el detalle; no se garantiza la entrega del gráfico o noticia.\n" + os.environ["RUN_URL"])
+          except Exception:
+              print("No se pudo entregar el aviso técnico por Telegram.")
+          PY

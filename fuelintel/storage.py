@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -136,21 +137,27 @@ class Store:
         finally:
             db.close()
 
-    def is_duplicate(self, candidate: Candidate, similarity_threshold: float = 0.78) -> tuple[bool, str]:
+    def is_duplicate(self, candidate: Candidate, similarity_threshold: float = 0.78, *, retry_unnotified: bool = False) -> tuple[bool, str]:
         url = canonical_url(candidate.url)
         cutoff = (candidate.detected_at - timedelta(days=7)).isoformat()
         with self.connect() as db:
             exact = db.execute(
-                "SELECT title FROM items WHERE content_hash = ? LIMIT 1",
+                "SELECT title, status, notified_at FROM items WHERE content_hash = ? LIMIT 1",
                 (candidate.content_hash,),
             ).fetchone()
             if exact:
+                if retry_unnotified and not exact["notified_at"] and exact["status"] in {"verified", "pending"}:
+                    return False, "reintentar contenido cuya entrega no fue confirmada"
                 return True, "huella exacta ya procesada"
             rows = db.execute(
-                "SELECT title FROM items WHERE detected_at >= ? AND canonical_url != ? ORDER BY detected_at DESC LIMIT 300",
+                "SELECT title, source_trust, status FROM items WHERE detected_at >= ? AND canonical_url != ? AND notified_at IS NOT NULL ORDER BY detected_at DESC LIMIT 300",
                 (cutoff, url),
             ).fetchall()
         for row in rows:
+            if row["status"] == "pending" or candidate.source.trust > row["source_trust"]:
+                continue
+            if re.findall(r"\d+(?:[.,]\d+)?", candidate.title) != re.findall(r"\d+(?:[.,]\d+)?", row["title"]):
+                continue
             if title_similarity(candidate.title, row["title"]) >= similarity_threshold:
                 return True, "titular equivalente ya procesado"
         return False, "contenido nuevo"
@@ -183,6 +190,9 @@ class Store:
                 ),
             )
             item_id = int(cursor.lastrowid or 0)
+            if cursor.rowcount == 0:
+                existing = db.execute("SELECT id FROM items WHERE content_hash = ?", (candidate.content_hash,)).fetchone()
+                return int(existing["id"]) if existing else 0
             if cursor.rowcount > 0:
                 payload = {
                     "content_hash": candidate.content_hash,
@@ -215,6 +225,26 @@ class Store:
         when = when or datetime.now(timezone.utc)
         with self.connect() as db:
             db.execute("UPDATE items SET notified_at = ? WHERE id = ?", (when.isoformat(), item_id))
+
+    def recent_notified_market_news(self, now: datetime | None = None, hours: int = 36, limit: int = 3) -> list[dict]:
+        """Return only recent, relevant stories that were already approved for Telegram."""
+        now = now or datetime.now(timezone.utc)
+        cutoff = (now - timedelta(hours=hours)).isoformat()
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT source_name, title, summary, canonical_url, status,
+                       relevance_score, published_at, detected_at
+                FROM items
+                WHERE notified_at IS NOT NULL
+                  AND relevance_score >= 45
+                  AND detected_at >= ?
+                ORDER BY relevance_score DESC, detected_at DESC
+                LIMIT ?
+                """,
+                (cutoff, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def save_price(self, price: FuelPrice) -> bool:
         with self.connect() as db:
@@ -559,4 +589,3 @@ class Store:
                 "INSERT INTO metadata(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
-

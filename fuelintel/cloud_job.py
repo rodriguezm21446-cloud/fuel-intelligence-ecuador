@@ -7,7 +7,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from .config import Settings, load_sources
+from .config import Settings, load_sources, load_x_sources
 from .main import build_runtime
 from .models import Candidate
 from .sources import parse_datetime
@@ -26,6 +26,7 @@ def required(name: str, maximum: int) -> str:
 def main() -> int:
     settings = Settings.from_env()
     sources = {source.id: source for source in load_sources(settings.sources_file)}
+    sources.update(load_x_sources(settings.sources_file.parent / "x_accounts.json"))
     source_id = required("FUELINTEL_EVENT_SOURCE_ID", 100)
     if source_id not in sources:
         raise ValueError(f"fuente desconocida: {source_id}")
@@ -43,7 +44,9 @@ def main() -> int:
         title=title,
         url=canonical_url(event_url),
         detected_at=detected_at,
-        raw_kind="link",
+        raw_kind="x" if sources[source_id].kind == "x" else "link",
+        body=os.getenv("FUELINTEL_EVENT_SUMMARY", "")[:5000] if sources[source_id].kind == "x" else "",
+        published_at=parse_datetime(os.getenv("FUELINTEL_EVENT_PUBLISHED_AT")),
     )
     candidate = poller.enrich(candidate)
     if not candidate.content_hash:
@@ -52,6 +55,8 @@ def main() -> int:
         ).hexdigest()
     result = pipeline.process(candidate, allow_notify=True, corroborated_by=corroborated_by)
     print(f"status={result.status} notified={result.notified} reason={result.reason}")
+    if result.status.value == "verified" and not result.notified:
+        return 1
     return 0
 
 

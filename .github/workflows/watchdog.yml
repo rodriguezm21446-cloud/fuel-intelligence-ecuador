@@ -1,0 +1,44 @@
+name: Fuel Intelligence Watchdog
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7 */6 * * *"
+permissions:
+  contents: read
+concurrency:
+  group: fuelintel-watchdog
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check detector independently
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          url = "https://fuelintel-ecuador.rodriguezm21446.workers.dev/health"
+          healthy = False
+          try:
+              with urllib.request.urlopen(url, timeout=20) as response:
+                  data = json.load(response)
+              healthy = data.get("status") == "ok" and bool(data.get("revision"))
+          except Exception:
+              pass
+          if not healthy:
+              token, chat = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
+              if token and chat:
+                  payload = json.dumps({"chat_id": chat, "text": "Aviso de combustibleEc: el monitor externo no confirma que el detector esté actualizado y sano. Puede haber retrasos o fuentes sin cobertura. Revisa Cloudflare /health."}).encode()
+                  request = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=payload, headers={"Content-Type": "application/json"})
+                  try:
+                      with urllib.request.urlopen(request, timeout=15) as response:
+                          if not json.load(response).get("ok"):
+                              print("Telegram no confirmó el aviso técnico")
+                  except Exception:
+                      print("No se pudo entregar el aviso técnico")
+              raise SystemExit("Detector no saludable o revisión anterior")
+          print("Detector saludable")
+          PY

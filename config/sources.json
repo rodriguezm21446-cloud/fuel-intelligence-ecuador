@@ -181,5 +181,113 @@
     "poll_seconds": 300,
     "idle_poll_seconds": 3600,
     "max_age_hours": 192
+  },
+  {
+    "id": "telegram-aja-news",
+    "name": "Al Jazeera Arabic — Telegram oficial",
+    "url": "https://t.me/s/AjaNews",
+    "kind": "telegram",
+    "trust": 85,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 12
+  },
+  {
+    "id": "google-news-ecuador-combustibles",
+    "name": "Google News — combustibles Ecuador (agregador)",
+    "url": "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20Petroecuador%29%20Ecuador&hl=es-419&gl=EC&ceid=EC:es-419",
+    "kind": "rss",
+    "trust": 72,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 24
+  },
+  {
+    "id": "elcomercio-rss",
+    "name": "El Comercio — RSS general",
+    "url": "https://www.elcomercio.com/feed/",
+    "kind": "rss",
+    "trust": 75,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "expreso-economia",
+    "name": "Expreso — Economía y negocios",
+    "url": "https://www.expreso.ec/economia-y-negocios/",
+    "kind": "html_links",
+    "trust": 75,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "lahora-economia",
+    "name": "La Hora — Economía",
+    "url": "https://www.lahora.com.ec/economia/",
+    "kind": "html_links",
+    "trust": 72,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "teleamazonas-economia",
+    "name": "Teleamazonas — Economía",
+    "url": "https://www.teleamazonas.com/categoria/noticias/economia/",
+    "kind": "html_links",
+    "trust": 72,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "eltelegrafo-economia",
+    "name": "El Telégrafo — Economía",
+    "url": "https://www.eltelegrafo.com.ec/noticias/economia/44",
+    "kind": "html_links",
+    "trust": 72,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "telegram-walter-bloomberg",
+    "name": "Walter Bloomberg — Telegram (agregador)",
+    "url": "https://t.me/s/WalterBloomberg",
+    "kind": "telegram",
+    "trust": 82,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 12
+  },
+  {
+    "id": "ukmto-maritime-security",
+    "name": "UKMTO — avisos oficiales de seguridad marítima",
+    "url": "https://www.ukmto.org/ukmto-products",
+    "kind": "html_links",
+    "trust": 95,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 300,
+    "idle_poll_seconds": 900,
+    "max_age_hours": 72
   }
 ]

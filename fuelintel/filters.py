@@ -38,6 +38,27 @@ HIGH_VALUE_TERMS = {
     "volatility": 3,
     "rbob": 6,
     "ulsd": 6,
+    "pipeline": 5,
+    "tanker": 5,
+    "hormuz": 7,
+    "strait of hormuz": 8,
+    "oil supply": 6,
+    "oil": 4,
+    "attack": 2,
+    "vessel": 4,
+    "shipping": 4,
+    "maritime": 3,
+    "bab al-mandab": 7,
+    "نفط": 6,
+    "الخام": 5,
+    "بنزين": 6,
+    "ديزل": 6,
+    "مصفاة": 5,
+    "هرمز": 8,
+    "ناقلة": 5,
+    "أوبك": 6,
+    "إمدادات النفط": 7,
+    "هجوم": 2,
 }
 
 EXCLUSION_TERMS = {
@@ -106,4 +127,3 @@ def evaluate_candidate(
 
     reasons.append("requiere confirmación independiente")
     return Decision(VerificationStatus.PENDING, min(79, candidate.source.trust), tuple(reasons), score)
-

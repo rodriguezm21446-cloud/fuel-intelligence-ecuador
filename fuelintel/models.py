@@ -102,4 +102,3 @@ class PriceChange:
     previous: Decimal | None
     absolute: Decimal | None
     percent: Decimal | None
-

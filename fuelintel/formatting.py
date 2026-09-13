@@ -169,9 +169,11 @@ def format_unconfirmed_news_squawk(
     candidate: Candidate,
     detected_local: datetime,
     sent_local: datetime | None = None,
+    editorial: Editorial | None = None,
 ) -> str:
     """Fast, clearly labelled single-source alert for a potentially material event."""
-    excerpt = collapse_spaces(candidate.summary or candidate.body)[:700].rstrip()
+    excerpt = (editorial.analysis if editorial else collapse_spaces(candidate.summary or candidate.body))[:700].rstrip()
+    headline = editorial.x_text if editorial else candidate.title
     lines = [
         "SQUAWK TEMPRANO — UNA SOLA FUENTE",
         f"Detectado: {format_ecuador_time(detected_local)}",
@@ -182,7 +184,7 @@ def format_unconfirmed_news_squawk(
         [
             "",
             "HECHO REPORTADO:",
-            candidate.title,
+            headline,
             "",
             "DATOS DISPONIBLES:",
             excerpt or "La fuente no publicó un resumen verificable; revisa el enlace.",
@@ -216,15 +218,30 @@ def format_unconfirmed_price_alert(
     if sent_local is not None:
         lines.append(f"Enviado: {format_ecuador_time(sent_local)}")
     lines.extend(["", candidate.title, "", "Valores mencionados por la fuente:"])
+    period = next((item.period for item in prices if item.period), None)
+    if period:
+        lines.append(f"Vigencia reportada: {period.start:%d/%m/%Y}–{period.end:%d/%m/%Y}")
+    if any(item.source_conflict for item in prices):
+        lines.extend(["Hay cifras contradictorias. Revisar las fuentes antes de publicar.", candidate.url])
+        return "\n".join(lines)
     lines.extend(f"{item.product}: ${_price(item.price)} por galón" for item in prices)
     lines.extend(
         [
             "",
             "Estado: no publicar todavía como precio oficial.",
             "Motivo: " + "; ".join(reasons[-3:]),
-            "El gráfico definitivo y el PDF se enviarán cuando ARCH o Petroecuador publiquen el documento verificable.",
+            "Puedes publicarlo únicamente como reporte atribuido a la fuente, dejando claro que no es una ficha oficial.",
+            "Seguiremos buscando corroboración y correcciones del reporte. La ausencia de PDF no impide esta alerta.",
             "",
-            f"Fuente periodística: {candidate.source.name}",
+            "TEXTO PARA X:",
+            trim_x(
+                "Ecuador | Reporte de precios: "
+                + " | ".join(f"{item.product}: ${_price(item.price)}" for item in prices)
+                + f". Fuente: {candidate.source.name}. Pendiente de ficha oficial.",
+                280,
+            ),
+            "",
+            f"Fuente del reporte: {candidate.source.name}",
             candidate.url,
         ]
     )
