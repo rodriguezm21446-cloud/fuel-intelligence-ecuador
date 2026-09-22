@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
@@ -12,6 +13,18 @@ from .text import collapse_spaces, trim_x
 ECUADOR_TIME_LABEL = "hora de Ecuador (UTC−5)"
 
 
+@dataclass(frozen=True, slots=True)
+class TelegramSections:
+    """A delivery plan whose entries must be sent as separate messages."""
+
+    squawk: str
+    context: str
+    forecast: str = ""
+
+    def messages(self) -> tuple[str, ...]:
+        return tuple(part for part in (self.squawk, self.context, self.forecast) if part.strip())
+
+
 def format_ecuador_time(value: datetime) -> str:
     """Render a user-facing timestamp with an unambiguous Ecuador label."""
     return f"{value:%d/%m/%Y %H:%M:%S} — {ECUADOR_TIME_LABEL}"
@@ -22,15 +35,161 @@ def _price(value: Decimal) -> str:
     return rendered.rstrip("0").rstrip(".")
 
 
-def compose_x_prices(prices: list[FuelPrice], changes: dict[str, PriceChange]) -> str:
+def _price_movement(product: str, current: Decimal, change: PriceChange | None, *, compact: bool = False) -> str:
+    current_text = _price(current)
+    if change is None or change.previous is None:
+        return f"{product} ${current_text} (sin base previa)"
+    previous_text = _price(change.previous)
+    if change.absolute == 0:
+        return f"{product} ${current_text} (antes ${previous_text}; sin cambio)"
+    sign = "+" if change.absolute and change.absolute > 0 else ""
+    if compact:
+        return f"{product} ${current_text} (antes ${previous_text})"
+    percent = "" if change.percent is None else f"; {sign}{change.percent}%"
+    return f"{product} ${current_text} (antes ${previous_text}; {sign}${change.absolute}{percent})"
+
+
+def _price_squawk(prefix: str, prices: list[FuelPrice], changes: dict[str, PriceChange], source: str) -> str:
+    """Keep every confirmed current/previous price before shortening prose."""
+    detailed = "; ".join(_price_movement(item.product, item.price, changes.get(item.product)) for item in prices)
+    message = f"{prefix}: {detailed}. Fuente: {source}."
+    if len(message) <= 300:
+        return message
+    compact = "; ".join(
+        _price_movement(item.product, item.price, changes.get(item.product), compact=True) for item in prices
+    )
+    message = f"{prefix}: {compact}. Fuente oficial."
+    if len(message) <= 300:
+        return message
+    # Current values are the irreducible facts. Never silently cut a number.
+    # The known Ecuador product set fits; an unexpected oversized set fails
+    # closed so an operator sees the schema problem instead of a partial post.
+    current_only = "; ".join(f"{item.product} ${_price(item.price)}" for item in prices)
+    message = f"{prefix}: {current_only}. Fuente oficial."
+    if len(message) > 300:
+        raise ValueError("el boletín excede 300 caracteres; se bloqueó para no cortar cifras")
+    return message
+
+
+def compose_x_prices(
+    prices: list[FuelPrice], changes: dict[str, PriceChange], source: str = "ARCH/Petroecuador"
+) -> str:
     period = prices[0].period if prices else None
-    heading = "PRECIOS DE COMBUSTIBLES"
+    heading = "Precios de combustibles"
     if period:
-        heading = f"PRECIOS DE COMBUSTIBLES | {period.start:%d/%m}–{period.end:%d/%m}"
+        heading = f"Precios de combustibles | {period.start:%d/%m}–{period.end:%d/%m}"
+    return _price_squawk(heading, prices, changes, source)
+
+
+def build_price_sections(
+    candidate: Candidate,
+    prices: list[FuelPrice],
+    changes: dict[str, PriceChange],
+    detected_local: datetime,
+    editorial: Editorial | None = None,
+    sent_local: datetime | None = None,
+    forecast: str = "",
+) -> TelegramSections:
+    """Create a short publishable price bulletin and a separate audit note."""
+    period = prices[0].period if prices else None
+    period_text = f"{period.start:%d/%m}–{period.end:%d/%m}" if period else "periodo por verificar"
+    squawk = _price_squawk(
+        f"Ecuador | Combustibles {period_text}", prices, changes, candidate.source.name
+    )
+    analysis = editorial.analysis if editorial else (
+        "Los valores, la unidad y la vigencia fueron comprobados con aritmética decimal. "
+        "No se atribuye una causa si el documento o una fuente verificable no la explica."
+    )
+    status = "fuente primaria" if candidate.source.trust >= 90 else "fuente corroborada"
+    context = "\n".join(
+        [
+            "VERIFICACIÓN Y CONTEXTO",
+            f"Estado: confirmado mediante {status}.",
+            f"Detectado: {format_ecuador_time(detected_local)}",
+            *((f"Enviado: {format_ecuador_time(sent_local)}",) if sent_local else ()),
+            "Detalle numérico comprobado:",
+            *(_price_movement(item.product, item.price, changes.get(item.product)) for item in prices),
+            f"Lectura: {analysis}",
+            *((f"Dudas: {editorial.doubts}",) if editorial and editorial.doubts else ()),
+            f"Fuente: {candidate.source.name}",
+            candidate.url,
+        ]
+    )
+    return TelegramSections(squawk=squawk, context=context, forecast=forecast)
+
+
+def build_news_sections(
+    candidate: Candidate,
+    detected_local: datetime,
+    corroborated: bool,
+    editorial: Editorial | None = None,
+    sent_local: datetime | None = None,
+    *,
+    confirmed: bool = True,
+) -> TelegramSections:
+    """Create a concise squawk plus source analysis, never a repeated monolith."""
+    excerpt = collapse_spaces(candidate.summary or candidate.body)
+    fallback = trim_x(
+        f"{candidate.title}. {excerpt[:120]} Fuente: {candidate.source.name}.",
+        300,
+    )
+    squawk = trim_x(editorial.x_text, 300) if editorial else fallback
+    if not confirmed:
+        status = "una sola fuente; pendiente de corroboración"
+    elif candidate.source.trust >= 90:
+        status = "fuente primaria"
+    elif corroborated:
+        status = "dos fuentes independientes"
+    else:
+        status = "fuente atribuida"
+    analysis = editorial.analysis if editorial else (
+        "El hecho se conserva atribuido a la fuente. No hay evidencia suficiente para presentar "
+        "una correlación de mercado como causa comprobada."
+    )
+    context = "\n".join(
+        [
+            "VERIFICACIÓN Y CONTEXTO",
+            f"Estado: {status}.",
+            f"Detectado: {format_ecuador_time(detected_local)}",
+            *((f"Enviado: {format_ecuador_time(sent_local)}",) if sent_local else ()),
+            f"Qué sabemos: {analysis}",
+            f"Posible canal hacia Ecuador: {market_impact_channel(candidate)}",
+            *((f"Dudas: {editorial.doubts}",) if editorial and editorial.doubts else ()),
+            f"Fuente: {candidate.source.name}",
+            candidate.url,
+        ]
+    )
+    return TelegramSections(squawk=squawk, context=context)
+
+
+def build_unconfirmed_price_sections(
+    candidate: Candidate,
+    prices: list[FuelPrice],
+    detected_local: datetime,
+    reasons: tuple[str, ...],
+    sent_local: datetime | None = None,
+) -> TelegramSections:
+    period = next((item.period for item in prices if item.period), None)
+    period_text = f"{period.start:%d/%m}–{period.end:%d/%m}" if period else "vigencia pendiente"
     values = " | ".join(f"{item.product}: ${_price(item.price)}" for item in prices)
-    changed = [change for change in changes.values() if change.absolute not in {None, Decimal("0") }]
-    note = "Sin cambios frente al periodo anterior." if not changed and changes else "Cambios frente al periodo anterior incluidos en el análisis."
-    return trim_x(f"{heading}\n{values}\n{note}\nFuente oficial: ARCH/Petroecuador", 280)
+    squawk = trim_x(
+        f"Ecuador | Reporte de combustibles {period_text}: {values}. "
+        f"Aún no es precio oficial. Fuente: {candidate.source.name}.",
+        300,
+    )
+    context = "\n".join(
+        [
+            "VERIFICACIÓN PENDIENTE",
+            "No publicar todavía como precio oficial.",
+            f"Detectado: {format_ecuador_time(detected_local)}",
+            *((f"Enviado: {format_ecuador_time(sent_local)}",) if sent_local else ()),
+            "Motivo: " + "; ".join(reasons[-3:]),
+            "El sistema seguirá buscando la fuente primaria o una corrección.",
+            f"Fuente del reporte: {candidate.source.name}",
+            candidate.url,
+        ]
+    )
+    return TelegramSections(squawk=squawk, context=context)
 
 
 def format_price_alert(
@@ -169,9 +328,11 @@ def format_unconfirmed_news_squawk(
     candidate: Candidate,
     detected_local: datetime,
     sent_local: datetime | None = None,
+    editorial: Editorial | None = None,
 ) -> str:
     """Fast, clearly labelled single-source alert for a potentially material event."""
-    excerpt = collapse_spaces(candidate.summary or candidate.body)[:700].rstrip()
+    excerpt = (editorial.analysis if editorial else collapse_spaces(candidate.summary or candidate.body))[:700].rstrip()
+    headline = editorial.x_text if editorial else candidate.title
     lines = [
         "SQUAWK TEMPRANO — UNA SOLA FUENTE",
         f"Detectado: {format_ecuador_time(detected_local)}",
@@ -182,7 +343,7 @@ def format_unconfirmed_news_squawk(
         [
             "",
             "HECHO REPORTADO:",
-            candidate.title,
+            headline,
             "",
             "DATOS DISPONIBLES:",
             excerpt or "La fuente no publicó un resumen verificable; revisa el enlace.",
@@ -216,15 +377,30 @@ def format_unconfirmed_price_alert(
     if sent_local is not None:
         lines.append(f"Enviado: {format_ecuador_time(sent_local)}")
     lines.extend(["", candidate.title, "", "Valores mencionados por la fuente:"])
+    period = next((item.period for item in prices if item.period), None)
+    if period:
+        lines.append(f"Vigencia reportada: {period.start:%d/%m/%Y}–{period.end:%d/%m/%Y}")
+    if any(item.source_conflict for item in prices):
+        lines.extend(["Hay cifras contradictorias. Revisar las fuentes antes de publicar.", candidate.url])
+        return "\n".join(lines)
     lines.extend(f"{item.product}: ${_price(item.price)} por galón" for item in prices)
     lines.extend(
         [
             "",
             "Estado: no publicar todavía como precio oficial.",
             "Motivo: " + "; ".join(reasons[-3:]),
-            "El gráfico definitivo y el PDF se enviarán cuando ARCH o Petroecuador publiquen el documento verificable.",
+            "Puedes publicarlo únicamente como reporte atribuido a la fuente, dejando claro que no es una ficha oficial.",
+            "Seguiremos buscando corroboración y correcciones del reporte. La ausencia de PDF no impide esta alerta.",
             "",
-            f"Fuente periodística: {candidate.source.name}",
+            "TEXTO PARA X:",
+            trim_x(
+                "Ecuador | Reporte de precios: "
+                + " | ".join(f"{item.product}: ${_price(item.price)}" for item in prices)
+                + f". Fuente: {candidate.source.name}. Pendiente de ficha oficial.",
+                280,
+            ),
+            "",
+            f"Fuente del reporte: {candidate.source.name}",
             candidate.url,
         ]
     )

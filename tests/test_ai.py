@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import json
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +24,26 @@ class GeminiTests(unittest.TestCase):
         mocked.side_effect = TimeoutError()
         editor = GeminiEditor("secret", "gemini-3.5-flash-lite")
         self.assertIsNone(editor.review("evidence", "safe draft"))
+
+    @patch("fuelintel.ai.urllib.request.urlopen")
+    def test_discards_numbers_invented_by_the_model(self, mocked):
+        content = json.dumps({"analysis": "El precio subirá 99%.", "x_text": "Subirá 99%.", "doubts": ""})
+        mocked.return_value = io.BytesIO(json.dumps({
+            "candidates": [{"content": {"parts": [{"text": content}]}}]
+        }).encode("utf-8"))
+        editor = GeminiEditor("secret", "gemini-3.5-flash-lite")
+        self.assertIsNone(editor.review("Extra cuesta $3.21.", "Extra: $3.21."))
+        self.assertIn("añadió cifras", editor.last_error)
+
+    @patch("fuelintel.ai.urllib.request.urlopen")
+    def test_discards_model_text_that_omits_a_verified_figure(self, mocked):
+        content = json.dumps({"analysis": "Precios comprobados.", "x_text": "Extra: $3.21.", "doubts": ""})
+        mocked.return_value = io.BytesIO(json.dumps({
+            "candidates": [{"content": {"parts": [{"text": content}]}}]
+        }).encode("utf-8"))
+        editor = GeminiEditor("secret", "gemini-3.5-flash-lite")
+        self.assertIsNone(editor.review("Extra $3.21 y diésel $4.50.", "Extra $3.21 | Diésel $4.50."))
+        self.assertIn("omitió cifras", editor.last_error)
 
 
 if __name__ == "__main__":

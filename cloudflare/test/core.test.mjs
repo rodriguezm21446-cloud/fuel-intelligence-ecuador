@@ -3,10 +3,25 @@ import assert from "node:assert/strict";
 import {
   canonicalUrl,
   extractRssCandidates,
+  extractTelegramCandidates,
   isRelevant,
   isRelevantCandidate,
+  isMarketSquawkSignal,
   titleOverlap
 } from "../src/core.js";
+
+test("despierta el squawk solo ante un evento energético material", () => {
+  assert.equal(
+    isMarketSquawkSignal("cnbc-energy-rss", "Brent jumps after pipeline outage", "Oil supply disrupted"),
+    true
+  );
+  assert.equal(isMarketSquawkSignal("cnbc-energy-rss", "Oil industry hiring", "Jobs report"), false);
+  assert.equal(isMarketSquawkSignal("eluniverso-economia-rss", "Brent jumps", "Pipeline outage"), false);
+  assert.equal(
+    isMarketSquawkSignal("telegram-aja-news", "ارتفاع أسعار النفط", "تعطل إمدادات الخام"),
+    true
+  );
+});
 
 test("detecta temas de combustible sin depender de acentos", () => {
   assert.equal(isRelevant("Nuevo precio del diésel en Ecuador"), true);
@@ -49,7 +64,7 @@ test("elimina rastreadores al normalizar URLs", () => {
 test("extrae elementos RSS", () => {
   const xml = `<rss><channel><item><title>Precio de gasolina cambia</title><link>https://example.test/a</link><description>Dato oficial</description></item></channel></rss>`;
   assert.deepEqual(extractRssCandidates(xml, "https://example.test"), [
-    { title: "precio de gasolina cambia", url: "https://example.test/a", summary: "dato oficial" }
+    { title: "Precio de gasolina cambia", url: "https://example.test/a", summary: "Dato oficial" }
   ]);
 });
 
@@ -63,3 +78,9 @@ test("mide coincidencia de titulares independientes", () => {
   assert.equal(titleOverlap("Precio de gasolina", "Partido de fútbol"), 0);
 });
 
+test("extrae mensajes individuales de un canal público de Telegram", () => {
+  const html = `<div class="tgme_widget_message_wrap"><div data-post="Canal/42"><div class="tgme_widget_message_text">Oil supply <b>falls</b></div></div></div>`;
+  assert.deepEqual(extractTelegramCandidates(html), [
+    { title: "Oil supply falls", url: "https://t.me/Canal/42", summary: "Oil supply falls" }
+  ]);
+});

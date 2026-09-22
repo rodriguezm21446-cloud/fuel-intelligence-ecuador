@@ -79,7 +79,7 @@ class DataArchitectureTests(unittest.TestCase):
             payload = build_national_payload(store)
             self.assertEqual(payload["labels"][-1], "12/08/2026")
             self.assertIn("Verificado:", payload["source"])
-            self.assertIn("ECT", payload["source"])
+            self.assertIn("hora de Ecuador (UTC−5)", payload["source"])
 
     def test_html_enforces_editorial_style(self):
         payload = {
@@ -99,14 +99,16 @@ class DataArchitectureTests(unittest.TestCase):
         self.assertIn("font-family: Inter, Arial, sans-serif", html)
         self.assertIn("position: 'right'", html)
         self.assertIn("align: 'inner'", html)
-        self.assertIn("mirror: true", html)
+        # The right-side axis now reserves its own width instead of mirroring
+        # labels into the plot; this prevents first/last tick clipping.
+        self.assertIn("mirror: false", html)
         self.assertIn("grid: { display: false }", html)
-        self.assertIn("margin: 0 90px 0 70px", html)
-        self.assertIn("right: 70, bottom: 12, left: 60", html)
+        self.assertIn("margin: 0 110px 0 100px", html)
+        self.assertIn("right: 96", html)
+        self.assertIn("left: 90", html)
         self.assertIn("overflow: visible", html)
-        self.assertIn("const DISPLAY_DECIMALS = 3", html)
-        self.assertNotIn("P.decimals", html)
-        self.assertGreaterEqual(html.count("formatMoney("), 3)
+        self.assertIn("Number.isInteger(P.displayDecimals)", html)
+        self.assertGreaterEqual(html.count("formatValue("), 3)
         self.assertIn("ctx.moveTo(x, area.top); ctx.lineTo(x, area.bottom)", html)
         for forbidden in ("Courier", "Consolas", "monospace", "linear-gradient", "box-shadow", "text-shadow"):
             self.assertNotIn(forbidden, html)
@@ -135,4 +137,3 @@ class DataArchitectureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

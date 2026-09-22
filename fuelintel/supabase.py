@@ -86,4 +86,3 @@ class SupabaseMirror:
                 store.mark_synced(ids)
                 synced += len(ids)
         return synced
-

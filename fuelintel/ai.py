@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
+from collections import Counter
 from dataclasses import dataclass
 
 from .text import collapse_spaces, trim_x
@@ -91,6 +93,20 @@ class GeminiEditor:
             x_text = trim_x(collapse_spaces(str(parsed.get("x_text", ""))), 280)
             doubts = collapse_spaces(str(parsed.get("doubts", "")))[:300].strip()
             if not analysis or not x_text:
+                self.last_error = "Gemini devolvió campos editoriales vacíos"
+                return None
+            def numbers(value: str) -> Counter[str]:
+                return Counter(token.replace(",", ".") for token in re.findall(r"\d+(?:[.,]\d+)?", value))
+
+            allowed_numbers = numbers(evidence + "\n" + fallback_x)
+            generated_numbers = numbers(analysis + "\n" + x_text + "\n" + doubts)
+            if any(count > allowed_numbers[token] for token, count in generated_numbers.items()):
+                self.last_error = "respuesta descartada: Gemini añadió cifras no presentes en la evidencia"
+                return None
+            required_x_numbers = numbers(fallback_x)
+            generated_x_numbers = numbers(x_text)
+            if any(generated_x_numbers[token] < count for token, count in required_x_numbers.items()):
+                self.last_error = "respuesta descartada: Gemini omitió cifras del borrador verificado"
                 return None
             return Editorial(analysis, x_text, doubts)
         except urllib.error.HTTPError as error:

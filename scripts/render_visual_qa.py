@@ -77,7 +77,13 @@ def render_zoom_crops(chart: Path, output_dir: Path) -> list[Path]:
     }
     rendered = []
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except Exception:
+            browser = playwright.chromium.launch(
+                headless=True,
+                executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            )
         page = browser.new_page(viewport={"width": 1000, "height": 550})
         page.goto(chart.resolve().as_uri(), wait_until="load")
         page.locator("img").evaluate(
@@ -114,4 +120,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

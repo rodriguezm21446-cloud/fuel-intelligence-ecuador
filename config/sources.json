@@ -27,8 +27,8 @@
   {
     "id": "presidencia-decretos",
     "name": "Presidencia - Decretos",
-    "url": "https://minka.presidencia.gob.ec/",
-    "kind": "html_links",
+    "url": "https://minka.presidencia.gob.ec/portal/usuarios_externos.jsf?wpmobileexternal=true",
+    "kind": "html",
     "trust": 100,
     "country": "EC",
     "critical": true,
@@ -123,6 +123,18 @@
     "max_age_hours": 72
   },
   {
+    "id": "oilprice-main-rss",
+    "name": "OilPrice.com - Energy RSS",
+    "url": "https://oilprice.com/rss/main",
+    "kind": "rss",
+    "trust": 78,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 18
+  },
+  {
     "id": "cnbc-finance-rss",
     "name": "CNBC - Finance RSS",
     "url": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
@@ -145,6 +157,30 @@
     "poll_seconds": 60,
     "idle_poll_seconds": 120,
     "max_age_hours": 18
+  },
+  {
+    "id": "eia-press-rss",
+    "name": "EIA - Press Releases RSS",
+    "url": "https://www.eia.gov/rss/press_rss.xml",
+    "kind": "rss",
+    "trust": 100,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 300,
+    "idle_poll_seconds": 900,
+    "max_age_hours": 168
+  },
+  {
+    "id": "eia-whats-new-rss",
+    "name": "EIA - What's New RSS",
+    "url": "https://www.eia.gov/about/new/WNtest3.php",
+    "kind": "rss",
+    "trust": 100,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 300,
+    "idle_poll_seconds": 900,
+    "max_age_hours": 168
   },
   {
     "id": "eia-today-energy-rss",
@@ -181,5 +217,125 @@
     "poll_seconds": 300,
     "idle_poll_seconds": 3600,
     "max_age_hours": 192
+  },
+  {
+    "id": "telegram-aja-news",
+    "name": "Al Jazeera Arabic — Telegram oficial",
+    "url": "https://t.me/s/AjaNews",
+    "kind": "telegram",
+    "trust": 85,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 12
+  },
+  {
+    "id": "google-news-ecuador-combustibles",
+    "name": "Google News — combustibles Ecuador (agregador)",
+    "url": "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20Petroecuador%29%20Ecuador&hl=es-419&gl=EC&ceid=EC:es-419",
+    "kind": "rss",
+    "trust": 72,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 24
+  },
+  {
+    "id": "google-news-global-oil-disruptions",
+    "name": "Google News - Global oil disruptions (aggregator)",
+    "url": "https://news.google.com/rss/search?q=%28oil%20OR%20diesel%20OR%20refinery%20OR%20pipeline%20OR%20tanker%29%20%28Saudi%20OR%20Russia%20OR%20OPEC%20OR%20Hormuz%20OR%20Houthi%29&hl=en-US&gl=US&ceid=US:en",
+    "kind": "rss",
+    "trust": 72,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 18
+  },
+  {
+    "id": "elcomercio-rss",
+    "name": "El Comercio — RSS general",
+    "url": "https://www.elcomercio.com/feed/",
+    "kind": "rss",
+    "trust": 75,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "expreso-economia",
+    "name": "Expreso — Economía y negocios",
+    "url": "https://www.expreso.ec/economia-y-negocios/",
+    "kind": "html_links",
+    "trust": 75,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "lahora-economia",
+    "name": "Google News — La Hora combustibles",
+    "url": "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20petroleo%29%20site%3Alahora.com.ec&hl=es-419&gl=EC&ceid=EC:es-419",
+    "kind": "rss",
+    "trust": 72,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "teleamazonas-economia",
+    "name": "Teleamazonas — Economía",
+    "url": "https://imagenes.teleamazonas.com/actualidad/noticias/economia/",
+    "kind": "html_links",
+    "trust": 72,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "eltelegrafo-economia",
+    "name": "Google News — El Telégrafo combustibles",
+    "url": "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20petroleo%29%20site%3Aeltelegrafo.com.ec&hl=es-419&gl=EC&ceid=EC:es-419",
+    "kind": "rss",
+    "trust": 72,
+    "country": "EC",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 36
+  },
+  {
+    "id": "telegram-walter-bloomberg",
+    "name": "Walter Bloomberg — Telegram (agregador)",
+    "url": "https://t.me/s/WalterBloomberg",
+    "kind": "telegram",
+    "trust": 82,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 12
+  },
+  {
+    "id": "ukmto-maritime-security",
+    "name": "UKMTO — avisos oficiales de seguridad marítima",
+    "url": "https://www.ukmto.org/ukmto-products",
+    "kind": "html_links",
+    "trust": 95,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 300,
+    "idle_poll_seconds": 900,
+    "max_age_hours": 72
   }
 ]

@@ -8,8 +8,9 @@ from pathlib import Path
 
 from fuelintel.calculations import price_change, validate_price
 from fuelintel.extractors import extract_effective_period, extract_fuel_prices
-from fuelintel.filters import evaluate_candidate
+from fuelintel.filters import evaluate_candidate, relevance_score
 from fuelintel.formatting import (
+    build_news_sections,
     compose_x_prices,
     format_ecuador_time,
     format_news_alert,
@@ -19,6 +20,7 @@ from fuelintel.models import Candidate, FuelPrice, SourceSpec, VerificationStatu
 from fuelintel.pipeline import Pipeline
 from fuelintel.storage import Store
 from fuelintel.setup_telegram import latest_private_chat
+from fuelintel.sources import parse_telegram_channel
 from fuelintel.text import canonical_url, title_similarity
 
 
@@ -62,6 +64,28 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(values["Ecopaís"], Decimal("2.40"))
         self.assertEqual(values["Diésel Premium"], Decimal("1.037"))
         self.assertEqual(values["Súper"], Decimal("2.98"))
+
+    def test_extracts_price_transitions_reported_by_ecuador_media(self):
+        text = """
+        Los precios rigen del 12 de septiembre al 11 de octubre de 2026.
+        Las gasolinas Extra y Ecopaís pasan de USD 3,24 a USD 3,21 por galón.
+        El diésel Premium baja de USD 3,18 a USD 3,15.
+        La gasolina Súper subirá a USD 4,89.
+        """
+        prices = extract_fuel_prices(text, "https://medio.example/nota", NOW, date(2026, 9, 11))
+        values = {item.product: item.price for item in prices}
+        self.assertEqual(values["Extra"], Decimal("3.21"))
+        self.assertEqual(values["Ecopaís"], Decimal("3.21"))
+        self.assertEqual(values["Diésel Premium"], Decimal("3.15"))
+        self.assertEqual(values["Súper"], Decimal("4.89"))
+
+    def test_does_not_mistake_old_super_price_for_new_price(self):
+        text = """
+        La gasolina Súper, que actualmente se comercializa en alrededor de USD 4,64,
+        tendrá un incremento de entre 12 y 15 centavos. Extra y Ecopaís bajarán.
+        """
+        prices = extract_fuel_prices(text, "https://medio.example/nota", NOW, date(2026, 9, 11))
+        self.assertNotIn("Súper", {item.product for item in prices})
 
     def test_extracts_only_automotive_terminal_rows_from_official_pdf(self):
         text = """
@@ -120,6 +144,14 @@ class VerificationTests(unittest.TestCase):
         self.assertTrue(validate_price(Decimal("2.4"))[0])
         self.assertFalse(validate_price(Decimal("98"))[0])
 
+    def test_incidental_words_do_not_trigger_fuel_alert(self):
+        candidate = Candidate(
+            source=OFFICIAL,
+            title="Archivo extraordinario de supermercados",
+            url="https://example.test/unrelated",
+        )
+        self.assertEqual(relevance_score(candidate), 0)
+
 
 class DeduplicationTests(unittest.TestCase):
     def test_tracking_params_removed(self):
@@ -165,6 +197,19 @@ class FormattingTests(unittest.TestCase):
         changes = {item.product: price_change(item.price, item.price) for item in prices}
         self.assertLessEqual(len(compose_x_prices(prices, changes)), 280)
 
+    def test_x_price_text_preserves_current_previous_and_change_figures(self):
+        prices = [
+            FuelPrice("Extra/Ecopaís", Decimal("2.720")),
+            FuelPrice("Diésel", Decimal("2.900")),
+            FuelPrice("Súper", Decimal("4.500")),
+        ]
+        previous = {"Extra/Ecopaís": Decimal("2.650"), "Diésel": Decimal("2.850"), "Súper": Decimal("4.400")}
+        changes = {item.product: price_change(item.price, previous[item.product]) for item in prices}
+        message = compose_x_prices(prices, changes)
+        self.assertLessEqual(len(message), 300)
+        for expected in ("2.72", "2.65", "0.070", "2.9", "2.85", "0.050", "4.5", "4.4", "0.100"):
+            self.assertIn(expected, message)
+
     def test_every_alert_identifies_ecuador_time_and_delivery_time(self):
         local = datetime(2026, 9, 11, 9, 15, tzinfo=timezone(timedelta(hours=-5)))
         self.assertEqual(
@@ -197,6 +242,20 @@ class FormattingTests(unittest.TestCase):
         self.assertIn("UNA SOLA FUENTE", message)
         self.assertIn("Aún no corroborada", message)
         self.assertIn("CANAL HACIA ECUADOR", message)
+
+    def test_short_squawk_and_context_are_separate(self):
+        local = datetime(2026, 9, 11, 9, 15, tzinfo=timezone(timedelta(hours=-5)))
+        candidate = Candidate(
+            source=OFFICIAL,
+            title="Petroecuador publica nuevos precios de gasolina",
+            url="https://example.test/precios",
+            summary="Los valores rigen desde el 12 de septiembre.",
+        )
+        sections = build_news_sections(candidate, local, False, sent_local=local)
+        self.assertLessEqual(len(sections.squawk), 300)
+        self.assertNotEqual(sections.squawk, sections.context)
+        self.assertNotIn(candidate.url, sections.squawk)
+        self.assertIn(candidate.url, sections.context)
 
 
 class _NoEnrichment:
@@ -246,7 +305,39 @@ class PipelineSafetyTests(unittest.TestCase):
             result = pipeline.process(candidate)
             self.assertEqual(result.status, VerificationStatus.PENDING)
             self.assertTrue(result.notified)
-            self.assertIn("SQUAWK TEMPRANO", notifier.messages[0])
+            self.assertEqual(len(notifier.messages), 2)
+            self.assertLessEqual(len(notifier.messages[0]), 300)
+            self.assertIn("pendiente de corroboración", notifier.messages[1])
+
+    def test_high_impact_story_sends_relevant_chart_before_separate_texts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            store = Store(root / "db.sqlite3")
+            notifier = _CaptureNotifier()
+            chart = root / "event.png"
+            chart.write_bytes(b"png")
+            source = SourceSpec(
+                id="oilprice-main-rss", name="OilPrice", url="https://example.test/rss",
+                kind="rss", trust=78, country="INTL", max_age_hours=18,
+            )
+            pipeline = Pipeline(
+                store, _NoEnrichment(), notifier, timezone.utc,
+                market_chart_generator=lambda *_: chart,
+            )
+            candidate = Candidate(
+                source=source,
+                title="Diesel and gasoline surge after refinery outage and pipeline attack",
+                url="https://example.test/energy",
+                summary="Oil supply and ULSD markets react to a reported refinery outage.",
+                published_at=NOW,
+                detected_at=NOW,
+                content_hash="event-chart-first",
+                raw_kind="rss",
+            )
+            result = pipeline.process(candidate)
+            self.assertTrue(result.notified)
+            self.assertEqual([kind for kind, _ in notifier.events], ["photo", "text", "text"])
+            self.assertIn("no demuestra causalidad", notifier.events[0][1])
 
     def test_domestic_price_report_wakes_operator_but_is_not_official(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -274,8 +365,9 @@ class PipelineSafetyTests(unittest.TestCase):
             result = pipeline.process(candidate)
             self.assertEqual(result.status, VerificationStatus.PENDING)
             self.assertTrue(result.notified)
-            self.assertIn("TODAVÍA NO CONFIRMADO", notifier.messages[0])
-            self.assertIn("no publicar todavía", notifier.messages[0])
+            self.assertEqual(len(notifier.messages), 2)
+            self.assertIn("Aún no es precio oficial", notifier.messages[0])
+            self.assertIn("No publicar todavía", notifier.messages[1])
 
     def test_expired_price_is_never_sent_or_saved_as_current(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -310,11 +402,11 @@ class PipelineSafetyTests(unittest.TestCase):
             )
             result = pipeline.process(candidate)
             self.assertEqual(result.status, VerificationStatus.VERIFIED)
-            self.assertEqual(len(notifier.messages), 1)
+            self.assertEqual(len(notifier.messages), 2)
             self.assertEqual(len(store.recent_prices()), 1)
             repeated = pipeline.process(candidate)
             self.assertEqual(repeated.status, VerificationStatus.DUPLICATE)
-            self.assertEqual(len(notifier.messages), 1)
+            self.assertEqual(len(notifier.messages), 2)
 
     def test_tomorrows_official_period_is_sent_when_pdf_appears_today(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -331,9 +423,9 @@ class PipelineSafetyTests(unittest.TestCase):
             )
             result = pipeline.process(candidate)
             self.assertEqual(result.status, VerificationStatus.VERIFIED)
-            self.assertEqual(len(notifier.messages), 1)
-            self.assertIn("PRÓXIMO PERIODO", notifier.messages[0])
-            self.assertEqual([kind for kind, _ in notifier.events], ["text", "document"])
+            self.assertEqual(len(notifier.messages), 2)
+            self.assertIn("12/09–11/10", notifier.messages[0])
+            self.assertEqual([kind for kind, _ in notifier.events], ["text", "text", "document"])
 
     def test_confirmed_price_sends_chart_before_context_and_pdf(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -360,7 +452,7 @@ class PipelineSafetyTests(unittest.TestCase):
             )
             result = pipeline.process(candidate)
             self.assertEqual(result.status, VerificationStatus.VERIFIED)
-            self.assertEqual([kind for kind, _ in notifier.events], ["photo", "text", "document"])
+            self.assertEqual([kind for kind, _ in notifier.events], ["photo", "text", "text", "document"])
 
     def test_far_future_official_period_is_held_for_review(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -403,6 +495,29 @@ class PipelineSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TelegramChannelTests(unittest.TestCase):
+    def test_public_preview_is_split_into_dated_posts(self):
+        source = SourceSpec("telegram-test", "Canal", "https://t.me/s/test", "telegram", 82, country="INTL")
+        payload = b'''<div class="tgme_widget_message_wrap">
+          <div class="tgme_widget_message" data-post="test/42">
+            <div class="tgme_widget_message_text">OIL FALLS<br>AFTER INVENTORY REPORT</div>
+            <time datetime="2026-09-13T10:30:00+00:00"></time>
+          </div>
+        </div>'''
+        posts = parse_telegram_channel(source, payload, NOW)
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0].url, "https://t.me/test/42")
+        self.assertEqual(posts[0].summary, "OIL FALLS AFTER INVENTORY REPORT")
+        self.assertEqual(posts[0].published_at, datetime(2026, 9, 13, 10, 30, tzinfo=timezone.utc))
+
+    def test_energy_alerts_score_in_english_and_arabic(self):
+        source = SourceSpec("telegram-test", "Canal", "https://t.me/s/test", "telegram", 82, country="INTL")
+        english = Candidate(source, "ATTACK ON SAUDI PIPELINE", "https://t.me/test/1")
+        arabic = Candidate(source, "هجوم على ناقلة في مضيق هرمز", "https://t.me/test/2")
+        self.assertGreaterEqual(relevance_score(english), 12)
+        self.assertGreaterEqual(relevance_score(arabic), 12)
 
 
 class TelegramSetupTests(unittest.TestCase):

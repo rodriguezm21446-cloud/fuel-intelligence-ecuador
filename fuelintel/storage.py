@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import Iterator
 from decimal import Decimal
 
-from .models import Candidate, Decision, FuelPrice
+from .models import Candidate, Decision, FuelPrice, PriceType
 from .text import canonical_url, fold, title_similarity
 
 
@@ -98,6 +99,57 @@ CREATE TABLE IF NOT EXISTS sync_outbox (
     UNIQUE(entity_type, dedupe_key)
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON sync_outbox(synced_at, id);
+
+CREATE TABLE IF NOT EXISTS ai_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    model TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ai_runs_created ON ai_runs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS forecast_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    generated_at TEXT NOT NULL,
+    product TEXT NOT NULL,
+    observations INTEGER NOT NULL,
+    publishable INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    estimate TEXT,
+    low TEXT,
+    high TEXT,
+    probability_up INTEGER,
+    probability_flat INTEGER,
+    probability_down INTEGER,
+    model_mae TEXT,
+    naive_mae TEXT,
+    target_effective_from TEXT,
+    actual_price TEXT,
+    absolute_error TEXT,
+    resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_forecast_product_time ON forecast_runs(product, generated_at DESC);
+
+CREATE TABLE IF NOT EXISTS market_ticks (
+    symbol TEXT NOT NULL,
+    series TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    price TEXT NOT NULL,
+    volume TEXT,
+    source TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY(symbol, observed_at)
+);
+CREATE INDEX IF NOT EXISTS idx_market_ticks_series_time ON market_ticks(series, observed_at DESC);
+
+CREATE TABLE IF NOT EXISTS message_deliveries (
+    item_id INTEGER NOT NULL,
+    section TEXT NOT NULL,
+    delivered_at TEXT NOT NULL,
+    PRIMARY KEY(item_id, section)
+);
 """
 
 
@@ -136,21 +188,27 @@ class Store:
         finally:
             db.close()
 
-    def is_duplicate(self, candidate: Candidate, similarity_threshold: float = 0.78) -> tuple[bool, str]:
+    def is_duplicate(self, candidate: Candidate, similarity_threshold: float = 0.78, *, retry_unnotified: bool = False) -> tuple[bool, str]:
         url = canonical_url(candidate.url)
         cutoff = (candidate.detected_at - timedelta(days=7)).isoformat()
         with self.connect() as db:
             exact = db.execute(
-                "SELECT title FROM items WHERE content_hash = ? LIMIT 1",
+                "SELECT title, status, notified_at FROM items WHERE content_hash = ? LIMIT 1",
                 (candidate.content_hash,),
             ).fetchone()
             if exact:
+                if retry_unnotified and not exact["notified_at"] and exact["status"] in {"verified", "pending"}:
+                    return False, "reintentar contenido cuya entrega no fue confirmada"
                 return True, "huella exacta ya procesada"
             rows = db.execute(
-                "SELECT title FROM items WHERE detected_at >= ? AND canonical_url != ? ORDER BY detected_at DESC LIMIT 300",
+                "SELECT title, source_trust, status FROM items WHERE detected_at >= ? AND canonical_url != ? AND notified_at IS NOT NULL ORDER BY detected_at DESC LIMIT 300",
                 (cutoff, url),
             ).fetchall()
         for row in rows:
+            if row["status"] == "pending" or candidate.source.trust > row["source_trust"]:
+                continue
+            if re.findall(r"\d+(?:[.,]\d+)?", candidate.title) != re.findall(r"\d+(?:[.,]\d+)?", row["title"]):
+                continue
             if title_similarity(candidate.title, row["title"]) >= similarity_threshold:
                 return True, "titular equivalente ya procesado"
         return False, "contenido nuevo"
@@ -183,6 +241,9 @@ class Store:
                 ),
             )
             item_id = int(cursor.lastrowid or 0)
+            if cursor.rowcount == 0:
+                existing = db.execute("SELECT id FROM items WHERE content_hash = ?", (candidate.content_hash,)).fetchone()
+                return int(existing["id"]) if existing else 0
             if cursor.rowcount > 0:
                 payload = {
                     "content_hash": candidate.content_hash,
@@ -216,6 +277,26 @@ class Store:
         with self.connect() as db:
             db.execute("UPDATE items SET notified_at = ? WHERE id = ?", (when.isoformat(), item_id))
 
+    def recent_notified_market_news(self, now: datetime | None = None, hours: int = 36, limit: int = 3) -> list[dict]:
+        """Return only recent, relevant stories that were already approved for Telegram."""
+        now = now or datetime.now(timezone.utc)
+        cutoff = (now - timedelta(hours=hours)).isoformat()
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT source_name, title, summary, canonical_url, status,
+                       relevance_score, published_at, detected_at
+                FROM items
+                WHERE notified_at IS NOT NULL
+                  AND relevance_score >= 45
+                  AND detected_at >= ?
+                ORDER BY relevance_score DESC, detected_at DESC
+                LIMIT ?
+                """,
+                (cutoff, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def save_price(self, price: FuelPrice) -> bool:
         with self.connect() as db:
             cursor = db.execute(
@@ -234,8 +315,8 @@ class Store:
                     price.period.start.isoformat() if price.period else None,
                     price.period.end.isoformat() if price.period else None,
                     canonical_url(price.source_url),
-                    price.verified_at.isoformat(),
                     price.observed_at.isoformat(),
+                    price.verified_at.isoformat(),
                     price.price_type.value,
                     price.source_name,
                     price.decree_resolution,
@@ -245,6 +326,7 @@ class Store:
             )
             inserted = cursor.rowcount > 0
             if inserted:
+                self._resolve_forecasts(db, price)
                 self._refresh_price_metrics(db, price.product, price.price_type.value)
                 effective_from = price.period.start.isoformat() if price.period else None
                 effective_to = price.period.end.isoformat() if price.period else None
@@ -267,6 +349,120 @@ class Store:
                 key = "|".join([price.product, str(price.price), effective_from or "", effective_to or "", canonical_url(price.source_url)])
                 self._enqueue(db, "prices", key, payload)
             return inserted
+
+    @staticmethod
+    def _resolve_forecasts(db: sqlite3.Connection, price: FuelPrice) -> None:
+        """Score prior forecasts only when their next official period arrives."""
+        if (
+            not price.period
+            or price.source_conflict
+            or price.verification_status != "CONFIRMED"
+            or price.price_type == PriceType.UNKNOWN
+        ):
+            return
+        target = price.period.start.isoformat()
+        rows = db.execute(
+            """
+            SELECT id, estimate FROM forecast_runs
+            WHERE product = ? AND publishable = 1 AND resolved_at IS NULL
+              AND target_effective_from = ? AND estimate IS NOT NULL
+            """,
+            (price.product, target),
+        ).fetchall()
+        resolved_at = price.verified_at.isoformat()
+        for row in rows:
+            error = abs(price.price - Decimal(row["estimate"]))
+            db.execute(
+                """
+                UPDATE forecast_runs
+                SET actual_price = ?, absolute_error = ?, resolved_at = ?
+                WHERE id = ?
+                """,
+                (str(price.price), str(error.quantize(Decimal("0.001"))), resolved_at, row["id"]),
+            )
+
+    def record_ai_run(self, model: str, purpose: str, success: bool, error: str = "") -> None:
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO ai_runs(created_at, model, purpose, status, error) VALUES (?, ?, ?, ?, ?)",
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    model[:120],
+                    purpose[:80],
+                    "accepted" if success else "fallback",
+                    error[:500],
+                ),
+            )
+
+    def record_forecast(self, result) -> None:
+        with self.connect() as db:
+            db.execute(
+                """
+                INSERT INTO forecast_runs(
+                    generated_at, product, observations, publishable, reason,
+                    estimate, low, high, probability_up, probability_flat,
+                    probability_down, model_mae, naive_mae, target_effective_from
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    result.product,
+                    result.observations,
+                    int(result.publishable),
+                    result.reason,
+                    str(result.estimate) if result.estimate is not None else None,
+                    str(result.low) if result.low is not None else None,
+                    str(result.high) if result.high is not None else None,
+                    result.probability_up,
+                    result.probability_flat,
+                    result.probability_down,
+                    str(result.model_mae) if result.model_mae is not None else None,
+                    str(result.naive_mae) if result.naive_mae is not None else None,
+                    result.target_effective_from.isoformat() if result.target_effective_from else None,
+                ),
+            )
+
+    def latest_ai_run(self) -> dict | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM ai_runs ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
+    def save_market_tick(
+        self, series: str, symbol: str, observed_at: datetime, price: float,
+        volume: float | None, received_at: datetime,
+    ) -> None:
+        """Persist one validated minute observation and bound local growth."""
+        cutoff = (received_at - timedelta(days=14)).isoformat()
+        with self.connect() as db:
+            db.execute(
+                """
+                INSERT INTO market_ticks(symbol, series, observed_at, price, volume, source, received_at)
+                VALUES (?, ?, ?, ?, ?, 'Yahoo Finance via yfinance', ?)
+                ON CONFLICT(symbol, observed_at) DO UPDATE SET
+                    price=excluded.price, volume=excluded.volume, received_at=excluded.received_at
+                """,
+                (
+                    symbol, series, observed_at.astimezone(timezone.utc).isoformat(),
+                    str(price), None if volume is None else str(volume),
+                    received_at.astimezone(timezone.utc).isoformat(),
+                ),
+            )
+            db.execute("DELETE FROM market_ticks WHERE observed_at < ?", (cutoff,))
+
+    def section_delivered(self, item_id: int, section: str) -> bool:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT 1 FROM message_deliveries WHERE item_id = ? AND section = ?",
+                (item_id, section),
+            ).fetchone()
+        return row is not None
+
+    def mark_section_delivered(self, item_id: int, section: str) -> None:
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO message_deliveries(item_id, section, delivered_at) VALUES (?, ?, ?)",
+                (item_id, section, datetime.now(timezone.utc).isoformat()),
+            )
 
     @staticmethod
     def _change(current: Decimal, previous: Decimal | None) -> tuple[str | None, str | None]:
@@ -559,4 +755,3 @@ class Store:
                 "INSERT INTO metadata(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
-

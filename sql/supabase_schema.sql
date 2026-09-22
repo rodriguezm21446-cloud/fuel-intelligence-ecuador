@@ -67,4 +67,3 @@ alter table public.fuelintel_price_metrics enable row level security;
 
 -- No se crean políticas públicas. El servidor usará una clave de servicio guardada
 -- únicamente en Oracle. El bot de Telegram nunca recibirá esta clave.
-

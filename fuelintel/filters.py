@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from .models import Candidate, Decision, EffectivePeriod, VerificationStatus
@@ -38,6 +39,41 @@ HIGH_VALUE_TERMS = {
     "volatility": 3,
     "rbob": 6,
     "ulsd": 6,
+    "pipeline": 5,
+    "tanker": 5,
+    "hormuz": 7,
+    "strait of hormuz": 8,
+    "oil supply": 6,
+    "production cut": 6,
+    "export ban": 7,
+    "sanction": 4,
+    "drone strike": 6,
+    "oil terminal": 6,
+    "port closure": 7,
+    "houthi": 6,
+    "oil": 4,
+    "attack": 2,
+    "vessel": 4,
+    "shipping": 4,
+    "maritime": 3,
+    "bab al-mandab": 7,
+    "نفط": 6,
+    "الخام": 5,
+    "بنزين": 6,
+    "ديزل": 6,
+    "مصفاة": 5,
+    "هرمز": 8,
+    "ناقلة": 5,
+    "أوبك": 6,
+    "إمدادات النفط": 7,
+    "هجوم": 2,
+    "sancion": 4,
+    "recorte de produccion": 6,
+    "prohibicion de exportacion": 7,
+    "ataque con drones": 6,
+    "terminal petrolera": 6,
+    "cierre de puerto": 7,
+    "huti": 6,
 }
 
 EXCLUSION_TERMS = {
@@ -45,14 +81,23 @@ EXCLUSION_TERMS = {
 }
 
 
+AMBIGUOUS_TERMS = {"extra", "super", "arch", "oil"}
+
+
+def _contains(text: str, term: str) -> bool:
+    if term not in AMBIGUOUS_TERMS:
+        return term in text
+    return re.search(rf"(?<![\w]){re.escape(term)}(?![\w])", text, flags=re.UNICODE) is not None
+
+
 def relevance_score(candidate: Candidate) -> int:
     title = fold(candidate.title)
     body = fold(f"{candidate.summary} {candidate.body}")
     score = 0
     for term, weight in HIGH_VALUE_TERMS.items():
-        if term in title:
+        if _contains(title, term):
             score += weight * 2
-        elif term in body:
+        elif _contains(body, term):
             score += weight
     if candidate.source.country == "EC" and "ecuador" in body:
         score += 3
@@ -106,4 +151,3 @@ def evaluate_candidate(
 
     reasons.append("requiere confirmación independiente")
     return Decision(VerificationStatus.PENDING, min(79, candidate.source.trust), tuple(reasons), score)
-

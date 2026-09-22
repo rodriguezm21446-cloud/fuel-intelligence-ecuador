@@ -3,7 +3,9 @@ export const TOPIC_WORDS = [
   "petroleo", "crudo", "brent", "wti", "opep", "opec", "refineria",
   "subsidio", "hidrocarburo", "derivados", "petroecuador", "arch",
   "gasoline", "diesel fuel", "crude oil", "refinery", "refining", "inventory",
-  "inventories", "shortage", "outage", "volatility", "rbob", "ulsd"
+  "inventories", "shortage", "outage", "volatility", "rbob", "ulsd", "oil",
+  "pipeline", "tanker", "vessel", "shipping", "maritime", "hormuz", "bab al-mandab",
+  "نفط", "الخام", "بنزين", "ديزل", "مصفاة", "هرمز", "ناقلة", "أوبك"
 ];
 
 const TRACKING_KEYS = new Set([
@@ -11,17 +13,19 @@ const TRACKING_KEYS = new Set([
   "utm_medium", "utm_source", "utm_term"
 ]);
 
-export function normalizeText(value = "") {
+export function cleanText(value = "") {
   return value
-    .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/<[^>]*>/g, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+    .trim();
+}
+
+export function normalizeText(value = "") {
+  return cleanText(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 export function isRelevant(title = "", summary = "") {
@@ -30,12 +34,15 @@ export function isRelevant(title = "", summary = "") {
 }
 
 export function isMarketSquawkSignal(sourceId, title = "", summary = "") {
-  if (!["cnbc-energy-rss", "cnbc-finance-rss"].includes(sourceId)) return false;
+  if (!["cnbc-energy-rss", "cnbc-finance-rss", "telegram-aja-news", "telegram-walter-bloomberg", "ukmto-maritime-security"].includes(sourceId)) return false;
   const text = normalizeText(`${title} ${summary}`);
-  const market = ["oil", "crude", "brent", "wti", "gasoline", "diesel", "refinery", "rbob", "ulsd"]
+  const market = ["oil", "crude", "brent", "wti", "gasoline", "diesel", "refinery", "rbob", "ulsd",
+    "pipeline", "tanker", "vessel", "shipping", "maritime", "hormuz", "bab al-mandab",
+    "نفط", "الخام", "بنزين", "ديزل", "مصفاة", "هرمز", "ناقلة"]
     .some((word) => text.includes(word));
   const event = ["surge", "jump", "rise", "fall", "drop", "attack", "outage", "shutdown", "pipeline",
-    "sanction", "inventory", "shortage", "opec", "supply", "disruption"]
+    "sanction", "inventory", "shortage", "opec", "supply", "disruption",
+    "ارتفاع", "انخفاض", "هبوط", "هجوم", "تعطل", "إغلاق", "عقوبات", "إمدادات"]
     .some((word) => text.includes(word));
   return market && event;
 }
@@ -66,7 +73,7 @@ export function canonicalUrl(value, base) {
 function tagValue(block, names) {
   for (const name of names) {
     const match = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`, "i"));
-    if (match) return normalizeText(match[1].replace(/^<!\[CDATA\[|\]\]>$/g, ""));
+    if (match) return cleanText(match[1].replace(/^<!\[CDATA\[|\]\]>$/g, ""));
   }
   return "";
 }
@@ -108,11 +115,23 @@ export function extractLinkCandidates(html, baseUrl) {
   const anchor = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
   while ((match = anchor.exec(html)) && results.length < 100) {
-    const title = normalizeText(match[2]);
+    const title = cleanText(match[2]);
     const url = canonicalUrl(match[1], baseUrl);
     if (!title || !url || seen.has(url) || !/^https?:/i.test(url)) continue;
     seen.add(url);
     results.push({ title, url, summary: "" });
+  }
+  return results;
+}
+
+export function extractTelegramCandidates(html) {
+  const results = [];
+  const blocks = html.match(/<div class="tgme_widget_message_wrap[^"]*"[\s\S]*?(?=<div class="tgme_widget_message_wrap|<\/section>|$)/gi) || [];
+  for (const block of blocks.slice(-50)) {
+    const post = block.match(/data-post=["']([^"']+)["']/i)?.[1];
+    const text = block.match(/<div class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/i)?.[1] || "";
+    const title = cleanText(text);
+    if (post && title) results.push({ title: title.slice(0, 500), url: `https://t.me/${post}`, summary: title });
   }
   return results;
 }

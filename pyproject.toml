@@ -4,14 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fuel-intelligence-ecuador"
-version = "0.1.0"
+version = "0.5.0"
 description = "Monitor verificable de combustibles para Ecuador con alertas privadas por Telegram."
 requires-python = ">=3.11"
 dependencies = [
   "playwright>=1.52,<2",
   "pypdf>=5,<7",
-  "openbb>=4.7,<5",
-  "openbb-yfinance>=1.6,<2",
+  "yfinance>=0.2,<2",
+  "bqplot>=0.12,<1",
+  "ipywidgets>=8,<9",
+  "websockets>=13,<16",
+  "duckdb>=1.4,<2",
+  "polars>=1.35,<2",
+  "pyarrow>=21,<24",
   "tzdata>=2025.2",
 ]
 
@@ -27,4 +32,3 @@ include = ["fuelintel*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
