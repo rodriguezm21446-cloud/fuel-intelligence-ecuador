@@ -13,6 +13,8 @@ const api = context.api;
 test("el detector distingue publicación reciente, antigua, futura y sin fecha", () => {
   const now = "2026-09-13T18:00:00Z";
   assert.equal(api.freshness("2026-09-13T17:59:00Z", now), "fresh");
+  assert.equal(api.freshness("2026-09-13T14:59:00Z", now), "stale");
+  assert.equal(api.freshness("2026-09-13T14:59:00Z", now, 24), "fresh");
   assert.equal(api.freshness("2026-08-13T17:59:00Z", now), "stale");
   assert.equal(api.freshness("2026-09-14T17:59:00Z", now), "future");
   assert.equal(api.freshness("", now), "unknown");

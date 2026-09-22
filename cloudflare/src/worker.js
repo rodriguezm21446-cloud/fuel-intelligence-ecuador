@@ -30,7 +30,7 @@ function isRelevant(title = "", summary = "") {
     : text.includes(word));
 }
 
-function freshness(publishedAt, detectedAt, hours = 24) {
+function freshness(publishedAt, detectedAt, hours = 2) {
   if (!publishedAt) return "unknown";
   const age = Date.parse(detectedAt) - Date.parse(publishedAt);
   if (!Number.isFinite(age)) return "unknown";
@@ -340,7 +340,9 @@ async function dispatchGithub(env, candidate, corroboratedBy = "") {
 
 async function saveCandidate(env, source, raw, bootstrap, detectedAt) {
   if (!isRelevantCandidate(source, raw)) return;
-  const current = freshness(raw.publishedAt, detectedAt);
+  // Urgent news must actually be recent. Official price documents are handled
+  // separately because a current effective period may outlive publication.
+  const current = freshness(raw.publishedAt, detectedAt, isOfficialFuelSource(source) ? 24 : 2);
   if (current === "stale" || current === "future") return;
   const eventKey = await sha256(`${source.id}\n${raw.url}\n${normalizeText(raw.title)}`);
   const status = bootstrap ? "baseline" : (source.trust >= 90 ? "ready" : "pending_corroboration");

@@ -67,6 +67,16 @@ document.getElementById('source').textContent = P.source;
 document.getElementById('credit').textContent = P.credit;
 const legend = document.getElementById('legend');
 for (const ds of P.datasets) {{
+  if (ds.colorsBySign) {{
+    for (const [text, color] of [['Subida', '#71866C'], ['Bajada', '#9A5E57']]) {{
+      const item = document.createElement('span'); item.className = 'legend-item';
+      const swatch = document.createElement('span'); swatch.className = 'swatch';
+      swatch.style.background = color;
+      const label = document.createElement('span'); label.textContent = text;
+      item.append(swatch, label); legend.append(item);
+    }}
+    continue;
+  }}
   const item = document.createElement('span'); item.className = 'legend-item';
   const swatch = document.createElement('span'); swatch.className = 'swatch' + (ds.pending ? ' pending' : '');
   swatch.style.background = ds.pending ? 'transparent' : ds.color;
@@ -79,6 +89,15 @@ for (const ds of P.datasets) {{
 }}
 const annotationPlugin = {{
   id: 'fuelintelAnnotations',
+  beforeDatasetsDraw(chart) {{
+    if (!P.zeroBaseline) return;
+    const ctx = chart.ctx, area = chart.chartArea;
+    const y = chart.scales.y.getPixelForValue(0);
+    if (y < area.top || y > area.bottom) return;
+    ctx.save(); ctx.strokeStyle = '{muted}'; ctx.globalAlpha = 0.45; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(area.left, y); ctx.lineTo(area.right, y); ctx.stroke();
+    ctx.restore();
+  }},
   afterDatasetsDraw(chart) {{
     const ctx = chart.ctx, area = chart.chartArea;
     ctx.save(); ctx.font = '600 13px Inter, Arial, sans-serif';
@@ -122,7 +141,8 @@ const annotationPlugin = {{
         const y = chart.scales.y.getPixelForValue(note.value);
         ctx.setLineDash([3, 4]); ctx.strokeStyle = '#777';
         ctx.beginPath(); ctx.moveTo(area.left, y); ctx.lineTo(area.right, y); ctx.stroke();
-        ctx.setLineDash([]); ctx.textAlign = 'left'; ctx.fillText(note.text, area.left + 6, y - 6);
+        ctx.setLineDash([]);
+        if (note.text) {{ ctx.textAlign = 'left'; ctx.fillText(note.text, area.left + 6, y - 6); }}
       }} else {{
         const x = chart.scales.x.getPixelForValue(note.index);
         ctx.setLineDash([3, 4]); ctx.strokeStyle = '#777';

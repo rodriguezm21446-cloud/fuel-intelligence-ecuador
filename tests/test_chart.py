@@ -154,6 +154,12 @@ class ChartTests(unittest.TestCase):
         payload = build_weekly_moves_payload({"WTI": rows, "Brent": rows})
         self.assertEqual(payload["chartKind"], "bar")
         self.assertEqual(payload["valueSuffix"], "%")
+        self.assertTrue(payload["zeroBaseline"])
+        self.assertEqual(payload["annotations"], [])
+        html = build_chart_html(payload)
+        self.assertIn("['Subida', '#71866C']", html)
+        self.assertIn("['Bajada', '#9A5E57']", html)
+        self.assertNotIn('"sin cambio"', html)
 
     def test_prediction_is_withheld_without_enough_history(self):
         rows = [(f"2026-08-{day:02d}", 70 + day / 10) for day in range(1, 31)]
