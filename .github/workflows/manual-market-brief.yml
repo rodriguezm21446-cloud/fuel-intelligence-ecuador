@@ -1,0 +1,61 @@
+name: Enviar resumen de mercado ahora
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuelintel-state
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FUELINTEL_DATA_DIR: data/runtime
+      FUELINTEL_TIMEZONE: America/Guayaquil
+      FUELINTEL_DRY_RUN: "false"
+      FUELINTEL_TELEGRAM_ENABLED: "true"
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      FUELINTEL_BRAND_NAME: "@combustibleEc"
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restore analysis memory
+        uses: actions/cache/restore@v4
+        with:
+          path: data/runtime
+          key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuelintel-state-
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check .
+
+      - name: Install Chromium for charts
+        run: python -m playwright install --with-deps chromium
+
+      - name: Send today's verified market chart and separate briefing
+        run: python -m fuelintel.main --dashboard
+
+      - name: Save analysis memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/runtime
+          key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
