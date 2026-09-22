@@ -111,9 +111,6 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
         except Exception as error:
             store.record_chart_error("WF_06_CHART_GENERATOR", f"nacional: {type(error).__name__}: {error}")
             LOG.exception("WF_08_ERROR_MONITOR registró el fallo del gráfico nacional")
-    if store.get_meta("last_market_daily_date") == now_local.date().isoformat():
-        store.set_meta("last_dashboard_at", datetime.now(timezone.utc).isoformat())
-        return 0
     try:
         related_news = store.recent_notified_market_news(now=datetime.now(timezone.utc), hours=36, limit=2)
         market_artifacts, market_sections, market_focus, latest_close = generate_market_bundle(
@@ -130,8 +127,8 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
         market_sections = None
         market_focus = "products"
         latest_close = ""
+    sent_market_chart = False
     if market_artifacts:
-        key, market_path, market_signature = market_artifacts[0]
         captions = {
             "crude": "WTI y Brent", "products": "Gasolina RBOB y diésel ULSD",
             "volatility": "Volatilidad realizada WTI y Brent", "heatmap": "Mapa de calor de combustibles",
@@ -139,30 +136,28 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             "spread": "Diferencial Brent–WTI", "indexed": "Evolución relativa de energía",
         }
         observed_label = f"Último dato observado: {latest_close}" if latest_close else "Sin fecha de observación comprobable"
-        try:
-            accepted = notifier.send_photo(
-                market_path,
-                f"Resumen diario: {captions[key]} · {observed_label} · {now_local:%d/%m/%Y %H:%M} hora de Ecuador",
-            )
-            if accepted:
-                previous_close = store.get_meta("last_market_observation")
-                store.set_meta(f"last_market_{key}_signature", market_signature)
-                store.set_meta("last_market_daily_date", now_local.date().isoformat())
-                store.set_meta("last_market_chart_error", "")
-                if market_sections:
-                    if latest_close and latest_close != previous_close:
-                        for message in market_sections.messages():
-                            notifier.send_text(message)
-                    else:
-                        notifier.send_text(
-                            f"Sin nueva observación de mercado. El gráfico muestra el último dato observado ({latest_close or 'fecha no disponible'}); no representa una nueva cotización."
-                        )
-                if latest_close:
-                    store.set_meta("last_market_observation", latest_close)
-        except Exception as error:
-            store.record_chart_error("WF_06_CHART_GENERATOR", f"envío diario: {type(error).__name__}: {error}")
-            LOG.exception("falló el envío diario del gráfico de mercado")
-            return 2
+        for key, market_path, market_signature in market_artifacts:
+            if store.get_meta(f"last_market_{key}_signature") == market_signature:
+                LOG.info("gráfico %s sin cambios; no se vuelve a enviar", key)
+                continue
+            try:
+                accepted = notifier.send_photo(
+                    market_path,
+                    f"Mercado: {captions[key]} · {observed_label} · {now_local:%d/%m/%Y %H:%M} hora de Ecuador",
+                )
+                if accepted:
+                    sent_market_chart = True
+                    store.set_meta(f"last_market_{key}_signature", market_signature)
+                    store.set_meta("last_market_chart_error", "")
+            except Exception as error:
+                store.record_chart_error("WF_06_CHART_GENERATOR", f"envío programado: {type(error).__name__}: {error}")
+                LOG.exception("falló el envío programado del gráfico %s", key)
+                return 2
+        if sent_market_chart and market_sections:
+            for message in market_sections.messages():
+                notifier.send_text(message)
+        if latest_close:
+            store.set_meta("last_market_observation", latest_close)
     elif store.get_meta("last_market_chart_error") != "sin_datos":
         notifier.send_text("ALERTA TÉCNICA: no llegaron datos de mercado suficientes. El gráfico no se publicó y se reintentará en la próxima ejecución programada.")
         store.set_meta("last_market_chart_error", "sin_datos")

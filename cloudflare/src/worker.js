@@ -216,18 +216,23 @@ async function sha256(value) {
 }
 
 const SOURCES = [
-  { id: "arch-precios", name: "ARCH - Precios de derivados", url: "https://controlhidrocarburos.gob.ec/precios-gasolinas-extra-y-ecopais/", kind: "html", trust: 100, pollSeconds: 60 },
-  { id: "arch-biblioteca", name: "ARCH - Biblioteca y resoluciones", url: "https://controlhidrocarburos.gob.ec/biblioteca/", kind: "links", trust: 100, pollSeconds: 120 },
-  { id: "presidencia-decretos", name: "Presidencia - Decretos", url: "https://minka.presidencia.gob.ec/portal/usuarios_externos.jsf?wpmobileexternal=true", kind: "html", trust: 100, pollSeconds: 120 },
+  { id: "arch-precios", name: "ARCH - Precios de derivados", url: "https://controlhidrocarburos.gob.ec/precios-gasolinas-extra-y-ecopais/", kind: "html", trust: 100, pollSeconds: 60, critical: true },
+  { id: "arch-biblioteca", name: "ARCH - Biblioteca y resoluciones", url: "https://controlhidrocarburos.gob.ec/biblioteca/", kind: "links", trust: 100, pollSeconds: 120, critical: true },
+  { id: "presidencia-decretos", name: "Presidencia - Decretos", url: "https://minka.presidencia.gob.ec/portal/usuarios_externos.jsf?wpmobileexternal=true", kind: "html", trust: 100, pollSeconds: 120, critical: false },
   { id: "bce-petroleo", name: "BCE - Estadísticas petroleras", url: "https://contenido.bce.fin.ec/?bcedata_grid_app=1", kind: "html", trust: 100, pollSeconds: 1800 },
-  { id: "petroecuador-precios", name: "EP Petroecuador - Estructuras de precios", url: "https://www.eppetroecuador.ec/?s=estructura+de+precios", kind: "links", trust: 100, pollSeconds: 60 },
-  { id: "petroecuador-historico", name: "EP Petroecuador - Histórico mensual de precios en terminal", url: "https://www.eppetroecuador.ec/?p=20421", kind: "links", trust: 100, pollSeconds: 60 },
+  { id: "petroecuador-precios", name: "EP Petroecuador - Estructuras de precios", url: "https://www.eppetroecuador.ec/?s=estructura+de+precios", kind: "links", trust: 100, pollSeconds: 60, critical: true },
+  { id: "petroecuador-historico", name: "EP Petroecuador - Histórico mensual de precios en terminal", url: "https://www.eppetroecuador.ec/?p=20421", kind: "links", trust: 100, pollSeconds: 60, critical: true },
   { id: "eluniverso-economia-rss", name: "El Universo - Economía", url: "https://www.eluniverso.com/arc/outboundfeeds/rss-subsection/noticias/economia?outputType=xml", kind: "rss", trust: 75, pollSeconds: 60 },
   { id: "primicias-economia", name: "Primicias - Economía", url: "https://www.primicias.ec/economia/", kind: "links", trust: 75, pollSeconds: 120 },
   { id: "ecuavisa-economia", name: "Ecuavisa - Economía", url: "https://www.ecuavisa.com/economia", kind: "links", trust: 75, pollSeconds: 60 },
   { id: "opec-press", name: "OPEP - Comunicados", url: "https://www.opec.org/", kind: "links", trust: 95, pollSeconds: 300 },
   { id: "cnbc-finance-rss", name: "CNBC - Finance RSS", url: "https://www.cnbc.com/id/10000664/device/rss/rss.html", kind: "rss", trust: 82, pollSeconds: 60 },
   { id: "cnbc-energy-rss", name: "CNBC - Energy RSS", url: "https://www.cnbc.com/id/19836768/device/rss/rss.html", kind: "rss", trust: 82, pollSeconds: 60 },
+  { id: "oilprice-main-rss", name: "OilPrice.com - Energy RSS", url: "https://oilprice.com/rss/main", kind: "rss", trust: 78, pollSeconds: 60 },
+  { id: "cbs-moneywatch-rss", name: "CBS News - MoneyWatch RSS", url: "https://www.cbsnews.com/latest/rss/moneywatch", kind: "rss", trust: 82, pollSeconds: 60 },
+  { id: "nyt-energy-rss", name: "The New York Times - Energy and Environment RSS", url: "https://rss.nytimes.com/services/xml/rss/nyt/EnergyEnvironment.xml", kind: "rss", trust: 82, pollSeconds: 120 },
+  { id: "yahoo-finance-energy-rss", name: "Google News - Yahoo Finance energía (agregador)", url: "https://news.google.com/rss/search?q=%28oil%20OR%20crude%20OR%20gasoline%20OR%20diesel%20OR%20refinery%20OR%20OPEC%29%20site%3Afinance.yahoo.com&hl=en-US&gl=US&ceid=US%3Aen", kind: "rss", trust: 72, pollSeconds: 60 },
+  { id: "doe-energy-news", name: "U.S. Department of Energy - Energy News", url: "https://www.energy.gov/listings/energy-news?view=rss", kind: "links", trust: 100, pollSeconds: 300 },
   { id: "eia-today-energy-rss", name: "EIA - Today in Energy RSS", url: "https://www.eia.gov/rss/todayinenergy.xml", kind: "rss", trust: 100, pollSeconds: 300 },
   { id: "eia-gasoline-diesel-rss", name: "EIA - Gasoline and Diesel Fuel Update RSS", url: "https://www.eia.gov/petroleum/gasdiesel/includes/gas_diesel_rss.xml", kind: "rss", trust: 100, pollSeconds: 300 },
   { id: "eia-weekly-petroleum", name: "EIA - Weekly Petroleum Status Report", url: "https://www.eia.gov/petroleum/supply/weekly/", kind: "html", trust: 100, pollSeconds: 300 }
@@ -471,15 +476,22 @@ async function reportOperationalHealth(env, detectedAt) {
     "SELECT source_id FROM source_state WHERE error_count >= 3 AND source_id NOT LIKE '__monitor%'").all();
   const backlog = await env.DB.prepare(
     "SELECT COUNT(*) AS total FROM event_candidates WHERE status = 'dispatch_failed' AND dispatch_attempts >= 4 AND julianday(detected_at) >= julianday('now', '-24 hours')").first();
-  const ids = (failed.results || []).map(row => row.source_id).sort();
-  if (!env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY) ids.push("github-sin-configurar");
-  if (Number(backlog?.total || 0)) ids.push(`envíos-agotados:${backlog.total}`);
-  const fingerprint = ids.join(",") || "healthy";
+  const failedIds = (failed.results || []).map(row => row.source_id).sort();
+  const criticalSet = new Set(SOURCES.filter(source => source.critical).map(source => source.id));
+  const criticalIds = failedIds.filter(id => criticalSet.has(id));
+  const partialIds = failedIds.filter(id => !criticalSet.has(id));
+  if (!env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY) criticalIds.push("github-sin-configurar");
+  if (Number(backlog?.total || 0)) criticalIds.push(`envíos-agotados:${backlog.total}`);
+  const fingerprint = [
+    ...criticalIds.map(id => `critical:${id}`),
+    ...partialIds.map(id => `partial:${id}`),
+  ].join(",") || "healthy";
   const previous = await env.DB.prepare("SELECT * FROM source_state WHERE source_id = '__monitor_health'").first();
   if (fingerprint === "healthy" && (!previous || previous.body_hash === "healthy")) return;
-  if (previous?.body_hash === fingerprint && Date.parse(detectedAt) - Date.parse(previous.checked_at) < 6 * 3600_000) return;
-  const message = ids.length
-    ? `Aviso técnico de combustibleEc\nLa vigilancia está incompleta. Revisar: ${ids.join(", ")}.\nLas demás fuentes continúan. No se ha confirmado la entrega de todos los análisis.`
+  const repeatAfter = criticalIds.length ? 6 * 3600_000 : 24 * 3600_000;
+  if (previous?.body_hash === fingerprint && Date.parse(detectedAt) - Date.parse(previous.checked_at) < repeatAfter) return;
+  const message = criticalIds.length || partialIds.length
+    ? `Aviso técnico de combustibleEc\n${criticalIds.length ? `Cobertura crítica: ${criticalIds.join(", ")}. ` : ""}${partialIds.length ? `Cobertura parcial: ${partialIds.join(", ")}. ` : ""}\nLas demás fuentes continúan activas.`
     : "combustibleEc: las fuentes y los envíos vigilados se han recuperado.";
   try {
     const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -539,11 +551,14 @@ export default {
       return !state || state.error_count >= 3 || !Number.isFinite(Date.parse(state.checked_at))
         || Date.now() - Date.parse(state.checked_at) > Math.max(600, source.pollSeconds * 3) * 1000;
     });
+    const criticalUnavailable = unavailable.filter(source => source.critical);
+    const missingConfiguration = !env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY;
     return Response.json({
       service: "fuelintel-ecuador",
-      status: unavailable.length || !env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY ? "degraded" : "ok",
-      revision: "reliability-2026-09-13",
+      status: missingConfiguration || criticalUnavailable.length ? "degraded" : (unavailable.length ? "partial" : "ok"),
+      revision: "reliability-2026-09-22",
       unavailableSources: unavailable.map(source => source.id),
+      criticalUnavailableSources: criticalUnavailable.map(source => source.id),
       directTelegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID),
       xEnabled: env.FUELINTEL_X_ENABLED === "true" && Boolean(env.X_BEARER_TOKEN),
       githubConfigured: Boolean(env.GITHUB_TOKEN && env.GITHUB_REPOSITORY),

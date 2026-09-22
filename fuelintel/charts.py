@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from .chart_renderer import render_chart
 from .storage import Store
@@ -155,26 +154,31 @@ def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | 
     if len(references) != len(grouped):
         references = []
 
-    newest = max(confirmed_rows, key=lambda row: row["verified_at"] or row["observed_at"])
-    verified = datetime.fromisoformat((newest["verified_at"] or newest["observed_at"]).replace("Z", "+00:00"))
-    verified = verified.astimezone(ZoneInfo("America/Guayaquil"))
-    sources = "/".join(sorted({row["source_name"] for row in confirmed_rows if row["source_name"]})) or "fuente oficial"
-    latest_values = [ds["values"][-1] for ds in datasets if ds["values"][-1] is not None]
-    insight = "Último periodo confirmado; las líneas punteadas identifican datos pendientes."
-    if latest_values:
-        prefix = "Precio vigente más alto" if len(dates) == 1 else "Último precio más alto del historial"
-        insight = f"{prefix}: ${max(latest_values):.3f}/galón. Consulte cada producto antes de publicar."
+    displayed_confirmed = [row for row in confirmed_rows if _when(row).date().isoformat() in dates]
+    source_names = sorted({row["source_name"] for row in displayed_confirmed if row["source_name"]})
+    sources = "/".join(source_names) or "fuente oficial"
+    source_urls = [str(row["source_url"] or "").casefold() for row in displayed_confirmed]
+    official_document = bool(source_urls) and all(
+        url.endswith(".pdf")
+        or ".pdf?" in url
+        or "download-monitor/download.php" in url
+        for url in source_urls
+    )
+    source_medium = "PDF oficial" if official_document else "Publicación oficial"
     type_label = {"PUBLICO": "precio al público", "TERMINAL": "precio en terminal", "REFERENCIAL": "precio referencial"}[selected_type]
+    period_start = min(_when(row).date() for row in displayed_confirmed)
+    period_end = max(
+        datetime.fromisoformat(str(row["effective_to"] or _when(row).date().isoformat())[:10]).date()
+        for row in displayed_confirmed
+    )
+    exact_period = f"{period_start:%d/%m/%Y}–{period_end:%d/%m/%Y}"
     period_count = len(dates)
     if period_count == 1:
         title = "Precio vigente de combustible en Ecuador"
-        period_description = f"Vigente desde {datetime.fromisoformat(dates[0]):%d/%m/%Y}"
+        period_description = f"Vigencia {exact_period}"
     else:
         title = "Histórico de precios de combustible en Ecuador"
-        period_description = (
-            f"{period_count} periodos oficiales · "
-            f"{datetime.fromisoformat(dates[0]):%d/%m/%Y}–{datetime.fromisoformat(dates[-1]):%d/%m/%Y}"
-        )
+        period_description = f"{period_count} periodos oficiales · {exact_period}"
     return {
         "title": title,
         "subtitle": f"{period_description} · {type_label} · USD por galón",
@@ -184,8 +188,8 @@ def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | 
         "references": references,
         "chartKind": "step",
         "stepped": True,
-        "insight": insight,
-        "source": f"Fuente: {sources} · Verificado: {verified:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)",
+        "insight": "",
+        "source": f"Fuente: {source_medium} de {sources} · Periodo: {exact_period}",
         "credit": own_data_label(),
         "theme": "dark",
         "displayDecimals": 3,
@@ -260,8 +264,11 @@ def generate_reported_price_chart(
         "references": [],
         "chartKind": "bar",
         "stepped": False,
-        "insight": "Pendiente de confirmación oficial. No incorporar al histórico ni publicar como precio oficial.",
-        "source": f"Fuente reportada: {source_name} · Detectado: {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)",
+        "insight": "",
+        "source": (
+            f"Fuente: {source_name} · Periodo: {period.start:%d/%m/%Y}–{period.end:%d/%m/%Y}"
+            if period else f"Fuente: {source_name} · Fecha: {now_local:%d/%m/%Y}"
+        ),
         "credit": own_data_label(),
         "theme": "dark",
         "displayDecimals": 3,

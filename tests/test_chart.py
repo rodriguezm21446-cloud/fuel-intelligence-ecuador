@@ -113,28 +113,29 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(payload["title"], "Petróleo: WTI y Brent")
         self.assertIn("cierres diarios", payload["subtitle"])
         self.assertEqual(payload["displayDecimals"], 2)
-        self.assertIn("No implica por sí solo", payload["insight"])
+        self.assertIn("Diferencial Brent–WTI", payload["insight"])
 
     def test_refined_products_have_same_units_and_three_decimals(self):
         rows = [(f"2026-08-{day:02d}", 2 + day / 100) for day in range(1, 22)]
         payload = build_refined_products_payload({"RBOB": rows, "ULSD": rows})
         self.assertIn("USD por galón", payload["subtitle"])
         self.assertEqual(payload["displayDecimals"], 3)
-        self.assertIn("No son precios oficiales de Ecuador", payload["insight"])
+        self.assertIn("Últimos cierres observados", payload["insight"])
 
     def test_us_retail_chart_uses_professional_measure_description(self):
         rows = [("2026-09-07", 4.1), ("2026-09-14", 4.2)]
         payload = build_us_retail_payload({"Gasolina regular": rows, "Diésel": rows})
-        self.assertIn("Promedios minoristas", payload["insight"])
+        self.assertIn("Encuesta oficial semanal de la EIA", payload["insight"])
         self.assertNotIn("no confundir", payload["insight"].casefold())
-        self.assertIn("publicación semanal", payload["source"])
+        self.assertIn("U.S. Energy Information Administration (EIA)", payload["source"])
+        self.assertIn("Periodo: 07/09/2026–14/09/2026", payload["source"])
 
     def test_volatility_uses_returns_and_is_not_a_direction_signal(self):
         rows = [(f"2026-08-{day:02d}", 70 + day * 0.2) for day in range(1, 29)]
         self.assertTrue(_rolling_volatility(rows, window=5))
         payload = build_volatility_payload({"WTI": rows, "Brent": rows})
         self.assertEqual(payload["valueSuffix"], "%")
-        self.assertIn("no dirección", payload["insight"])
+        self.assertIn("20 cierres", payload["insight"])
 
     def test_market_series_rejects_ticker_collisions_and_wrong_units(self):
         days = [(f"2026-08-{day:02d}", 80.0) for day in range(1, 31)]
@@ -147,7 +148,7 @@ class ChartTests(unittest.TestCase):
         rows = [(f"2026-08-{day:02d}", 70 + day) for day in range(1, 31)]
         payload = build_market_heatmap_payload({"WTI": rows, "Brent": rows})
         self.assertEqual([row["label"] for row in payload["rows"]], ["WTI", "Brent"])
-        self.assertIn("no mezcla USD por barril", payload["insight"])
+        self.assertIn("1, 5 y 20 sesiones", payload["insight"])
 
     def test_weekly_moves_use_bars_and_percentages(self):
         rows = [(f"2026-08-{day:02d}", 70 + day) for day in range(1, 31)]

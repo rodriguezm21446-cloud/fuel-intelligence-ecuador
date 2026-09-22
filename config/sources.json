@@ -135,6 +135,54 @@
     "max_age_hours": 18
   },
   {
+    "id": "cbs-moneywatch-rss",
+    "name": "CBS News - MoneyWatch RSS",
+    "url": "https://www.cbsnews.com/latest/rss/moneywatch",
+    "kind": "rss",
+    "trust": 82,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 18
+  },
+  {
+    "id": "nyt-energy-rss",
+    "name": "The New York Times - Energy and Environment RSS",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/EnergyEnvironment.xml",
+    "kind": "rss",
+    "trust": 82,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 120,
+    "idle_poll_seconds": 300,
+    "max_age_hours": 24
+  },
+  {
+    "id": "yahoo-finance-energy-rss",
+    "name": "Google News - Yahoo Finance energía (agregador)",
+    "url": "https://news.google.com/rss/search?q=%28oil%20OR%20crude%20OR%20gasoline%20OR%20diesel%20OR%20refinery%20OR%20OPEC%29%20site%3Afinance.yahoo.com&hl=en-US&gl=US&ceid=US%3Aen",
+    "kind": "rss",
+    "trust": 72,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 120,
+    "max_age_hours": 18
+  },
+  {
+    "id": "doe-energy-news",
+    "name": "U.S. Department of Energy - Energy News",
+    "url": "https://www.energy.gov/listings/energy-news?view=rss",
+    "kind": "html_links",
+    "trust": 100,
+    "country": "INTL",
+    "critical": false,
+    "poll_seconds": 300,
+    "idle_poll_seconds": 900,
+    "max_age_hours": 168
+  },
+  {
     "id": "cnbc-finance-rss",
     "name": "CNBC - Finance RSS",
     "url": "https://www.cnbc.com/id/10000664/device/rss/rss.html",

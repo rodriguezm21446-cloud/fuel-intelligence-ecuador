@@ -14,6 +14,7 @@ from .anomalies import detect_anomalies
 from .chart_renderer import render_chart, render_heatmap
 from .charts import own_data_label
 from .formatting import TelegramSections
+from .market_math import percentage_change, validate_market_series
 from .text import trim_x
 
 
@@ -85,7 +86,7 @@ def _weekly_closes(rows: list[tuple[str, float]]) -> list[tuple[str, float]]:
 def _change(rows: list[tuple[str, float]], sessions: int) -> float | None:
     if len(rows) <= sessions or rows[-1][1] <= 0 or rows[-1 - sessions][1] <= 0:
         return None
-    return (rows[-1][1] / rows[-1 - sessions][1] - 1) * 100
+    return percentage_change(rows[-1][1], rows[-1 - sessions][1])
 
 
 def _rolling_volatility(rows: list[tuple[str, float]], window: int = 20) -> list[tuple[str, float]]:
@@ -136,12 +137,10 @@ def estimate_direction(rows: list[tuple[str, float]], horizon: int = 5) -> Marke
 def _source_line(
     labels: list[str], provider: str = "Yahoo Finance", publication_note: str = "datos diferidos"
 ) -> str:
-    verified = datetime.now(timezone.utc).astimezone(ECUADOR_TZ)
-    as_of = labels[-1] if labels else "sin fecha"
-    return (
-        f"Datos: {provider} · Última observación: {as_of} · "
-        f"Verificado: {verified:%d/%m/%Y %H:%M:%S} · hora de Ecuador (UTC−5) · {publication_note}"
-    )
+    if not labels:
+        return f"Fuente: {provider}"
+    period = labels[-1] if len(labels) == 1 else f"{labels[0]}–{labels[-1]}"
+    return f"Fuente: {provider} · Periodo: {period}"
 
 
 def _series_payload(
@@ -188,7 +187,7 @@ def build_market_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict
             spread = brent[day] - wti[day]
             insight = (
                 f"Diferencial Brent–WTI del {datetime.fromisoformat(day):%d/%m/%Y}: "
-                f"${spread:+.2f}/barril. No implica por sí solo un cambio en Ecuador."
+                f"${spread:+.2f}/barril."
             )
     return _series_payload(
         raw_series, title="Petróleo: WTI y Brent",
@@ -201,7 +200,7 @@ def build_refined_products_payload(raw_series: dict[str, list[tuple[str, float]]
     return _series_payload(
         raw_series, title="Gasolina y diésel mayoristas de EE. UU.",
         subtitle="Últimas 90 sesiones · futuros RBOB y ULSD · USD por galón",
-        insight="No son precios oficiales de Ecuador: RBOB y ULSD son referencias mayoristas, no precios de gasolinera.",
+        insight="Últimos cierres observados de gasolina RBOB y diésel ULSD.",
         decimals=3, kind="line",
     )
 
@@ -218,7 +217,7 @@ def build_brent_wti_spread_payload(raw_series: dict[str, list[tuple[str, float]]
         {"Brent menos WTI": spread},
         title="Diferencial Brent–WTI",
         subtitle="Cierres de la misma fecha · USD por barril",
-        insight=f"Último diferencial: ${spread[-1][1]:+.2f}/barril. Mide distancia entre referencias, no el precio en Ecuador.",
+        insight=f"Último diferencial: ${spread[-1][1]:+.2f}/barril.",
         decimals=2,
     )
 
@@ -241,7 +240,7 @@ def build_indexed_energy_payload(raw_series: dict[str, list[tuple[str, float]]])
         indexed,
         title="Energía: evolución relativa",
         subtitle=f"Base 100 el {datetime.fromisoformat(common[0]):%d/%m/%Y} · cierres comparables",
-        insight="Compara evolución porcentual desde la misma fecha; no compara precios absolutos ni predice Ecuador.",
+        insight="Evolución porcentual de cada serie desde una base común de 100.",
         decimals=1, prefix="", suffix="",
     )
 
@@ -251,7 +250,7 @@ def build_volatility_payload(raw_series: dict[str, list[tuple[str, float]]]) -> 
     return _series_payload(
         volatility, title="Volatilidad realizada del petróleo",
         subtitle="Ventana móvil de 20 sesiones · anualizada · porcentaje",
-        insight="Mide la variación pasada; no dirección ni probabilidad futura por sí sola.",
+        insight="Variación anualizada calculada con los últimos 20 cierres.",
         decimals=1, kind="area", prefix="", suffix="%",
     )
 
@@ -265,7 +264,10 @@ def build_weekly_moves_payload(raw_series: dict[str, list[tuple[str, float]]]) -
             values.append(change)
     if not names:
         return None
-    verified = datetime.now(timezone.utc).astimezone(ECUADOR_TZ)
+    observed_days = sorted(
+        {day for name in names for day, _ in raw_series.get(name, [])[-6:]}
+    )
+    rendered_days = [datetime.fromisoformat(day).strftime("%d/%m/%Y") for day in observed_days]
     return {
         "title": "Movimiento semanal de energía",
         "subtitle": "Cambio porcentual en las últimas cinco sesiones · bases comparables",
@@ -275,8 +277,8 @@ def build_weekly_moves_payload(raw_series: dict[str, list[tuple[str, float]]]) -
         "zeroBaseline": True,
         "references": [],
         "chartKind": "bar",
-        "insight": "Las barras comparan rendimientos porcentuales; no mezclan niveles en USD/barril y USD/galón.",
-        "source": f"Datos: Yahoo Finance · Verificado: {verified:%d/%m/%Y %H:%M:%S} · hora de Ecuador (UTC−5) · datos diferidos",
+        "insight": "Cambio porcentual acumulado durante las últimas cinco sesiones.",
+        "source": _source_line(rendered_days),
         "credit": own_data_label(),
         "displayDecimals": 2,
         "valuePrefix": "",
@@ -306,7 +308,7 @@ def build_us_retail_payload(raw_series: dict[str, list[tuple[str, float]]]) -> d
         "references": references,
         "chartKind": "line",
         "stepped": False,
-        "insight": "Promedios minoristas nacionales semanales publicados por la EIA, incluidos impuestos.",
+        "insight": "Encuesta oficial semanal de la EIA · promedios nacionales con impuestos.",
         "source": _source_line(
             rendered,
             "U.S. Energy Information Administration (EIA)",
@@ -332,7 +334,7 @@ def build_market_heatmap_payload(raw_series: dict[str, list[tuple[str, float]]])
         "title": "Mapa de calor del mercado de combustibles",
         "subtitle": "Variación de cierres observados · verde sube, rojo baja",
         "rows": rows,
-        "insight": "Compara rendimientos porcentuales; no mezcla USD por barril con USD por galón.",
+        "insight": "Rendimiento observado a 1, 5 y 20 sesiones.",
         "source": _source_line([datetime.fromisoformat(latest).strftime("%d/%m/%Y")]),
         "credit": own_data_label(),
     }
@@ -445,6 +447,7 @@ def load_market_series() -> dict[str, list[tuple[str, float]]]:
         for symbol in symbols:
             try:
                 rows = _history(symbol)
+                validate_market_series(name, rows)
                 if _plausible_market_series(name, rows):
                     raw_series[name] = rows
                     break
@@ -559,7 +562,7 @@ def generate_event_market_chart(text: str, destination: Path) -> Path | None:
         payload = build_market_payload({key: value for key, value in raw.items() if key in {"WTI", "Brent"}})
     if payload is None:
         return None
-    payload["insight"] = "Contexto de mercado observado; la coincidencia temporal no demuestra que la noticia causó el movimiento."
+    payload["insight"] = "Movimiento de mercado observado alrededor de la noticia seleccionada."
     return render_heatmap(payload, destination) if chart_key == "heatmap" else render_chart(payload, destination)
 
 
@@ -591,12 +594,17 @@ def generate_market_bundle(
         ("spread", build_brent_wti_spread_payload(raw_series)),
         ("indexed", build_indexed_energy_payload(raw_series)),
     ]
+    retail_spec = next(((key, payload) for key, payload in specs if key == "us-retail" and payload), None)
     if selected_only and focus == "heatmap":
         specs = []
     elif selected_only:
         preferred = next(((key, payload) for key, payload in specs if key == focus and payload), None)
         fallback = next(((key, payload) for key, payload in specs if payload), None)
         specs = [preferred or fallback] if preferred or fallback else []
+    if selected_only and retail_spec and all(key != "us-retail" for key, _ in specs):
+        # The official EIA weekly survey is an independent publication cadence;
+        # its data signature prevents repeats when the survey has not changed.
+        specs.append(retail_spec)
     destination_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[tuple[str, Path, str]] = []
     for key, payload in specs:

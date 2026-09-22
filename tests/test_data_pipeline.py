@@ -78,8 +78,8 @@ class DataArchitectureTests(unittest.TestCase):
             store.save_price(official_price("Extra", "2.500", date(2026, 9, 12), status="PENDING"))
             payload = build_national_payload(store)
             self.assertEqual(payload["labels"][-1], "12/08/2026")
-            self.assertIn("Verificado:", payload["source"])
-            self.assertIn("hora de Ecuador (UTC−5)", payload["source"])
+            self.assertIn("Fuente:", payload["source"])
+            self.assertIn("Periodo: 12/08/2026–12/08/2026", payload["source"])
 
     def test_html_enforces_editorial_style(self):
         payload = {
@@ -97,6 +97,9 @@ class DataArchitectureTests(unittest.TestCase):
         }
         html = build_chart_html(payload)
         self.assertIn("font-family: Inter, Arial, sans-serif", html)
+        self.assertIn("color: #8CC8FF", html)
+        self.assertNotIn('id="insight"', html)
+        self.assertNotIn('id="credit"', html)
         self.assertIn("position: 'right'", html)
         self.assertIn("align: 'inner'", html)
         # The right-side axis now reserves its own width instead of mirroring

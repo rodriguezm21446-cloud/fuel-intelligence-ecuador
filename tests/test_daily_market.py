@@ -33,7 +33,7 @@ class _Notifier:
 
 
 class DailyMarketTests(unittest.TestCase):
-    def test_daily_delivery_is_once_per_ecuador_day_even_if_data_unchanged(self):
+    def test_scheduled_delivery_only_repeats_when_verified_data_changes(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             store = Store(root / "db.sqlite3")
@@ -43,18 +43,19 @@ class DailyMarketTests(unittest.TestCase):
             chart.write_bytes(b"png")
             sections = TelegramSections("Titular comprobado", "Contexto comprobado")
             bundle = ([('products', chart, 'same-data-signature')], sections, 'products', '2026-09-18')
+            changed = ([('products', chart, 'new-data-signature')], sections, 'products', '2026-09-19')
             day_one = datetime(2026, 9, 20, 18, 17, tzinfo=settings.timezone)
             with patch("fuelintel.main.build_runtime", return_value=(store, None, notifier, None)), \
                  patch("fuelintel.main.national_data_signature", return_value=None), \
-                 patch("fuelintel.main.generate_market_bundle", return_value=bundle) as generated:
+                 patch("fuelintel.main.generate_market_bundle", side_effect=[bundle, bundle, changed]) as generated:
                 self.assertEqual(dashboard(settings, day_one), 0)
                 self.assertEqual(dashboard(settings, day_one + timedelta(hours=1)), 0)
                 self.assertEqual(dashboard(settings, day_one + timedelta(days=1)), 0)
-            self.assertEqual(generated.call_count, 2)
+            self.assertEqual(generated.call_count, 3)
             self.assertEqual(len(notifier.photos), 2)
             self.assertIn("Último dato observado: 2026-09-18", notifier.photos[0][1])
             self.assertEqual(notifier.texts[:2], ["Titular comprobado", "Contexto comprobado"])
-            self.assertIn("Sin nueva observación", notifier.texts[-1])
+            self.assertEqual(notifier.texts[-2:], ["Titular comprobado", "Contexto comprobado"])
 
     def test_spread_uses_only_dates_shared_by_both_markets(self):
         raw = {

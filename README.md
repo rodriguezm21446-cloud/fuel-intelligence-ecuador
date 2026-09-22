@@ -88,7 +88,7 @@ Playwright necesita Chromium una sola vez por entorno:
 python -m playwright install chromium
 ```
 
-`python -m fuelintel.main --dashboard` revisa el gráfico nacional de los últimos cuatro periodos y envía **un gráfico de mercado por día de Ecuador**. La vista se escoge según la noticia verificada o la anomalía medida, sin cambiar el tipo de gráfico solo por decoración. Si no hay un dato nuevo (por ejemplo, en fin de semana), el mensaje identifica la fecha del último dato y no lo presenta como cotización nueva. Una segunda ejecución el mismo día no duplica el resumen. `python -m fuelintel.main --historical-dashboard` genera el histórico nacional completo solo cuando el operador lo solicita.
+`python -m fuelintel.main --dashboard` revisa el gráfico nacional de los últimos cuatro periodos y los gráficos de mercado. GitHub lo ejecuta cinco veces al día (00:17, 05:17, 10:17, 15:17 y 20:17 UTC), pero Telegram recibe una imagen únicamente cuando cambia la evidencia verificada. La vista se escoge según la noticia verificada o la anomalía medida, sin cambiar el tipo de gráfico solo por decoración. La encuesta semanal de la EIA usa su propio gráfico y firma. `python -m fuelintel.main --historical-dashboard` genera el histórico nacional completo solo cuando el operador lo solicita.
 
 `python -m fuelintel.main --interactive-market` exporta un HTML bqplot local para exploración. No publica ni envía nada. bqplot es el visor interactivo; no es proveedor de datos ni sustituye las validaciones. Una marca de hora indica cuándo se verificó la información, pero nunca convierte un cierre diferido o una publicación semanal en dato en tiempo real.
 
@@ -125,7 +125,7 @@ Nunca se deben guardar tokens en el código, el ZIP o GitHub.
 
 ## Uso austero en la nube
 
-Cloudflare detecta cambios y GitHub Actions hace el procesamiento pesado. Chromium solo se abre cuando hay que capturar un gráfico; las consultas usan `ETag`/`Last-Modified`, el contenido repetido se descarta y el gráfico programado solo se envía cuando su firma cambia.
+Cloudflare detecta cambios y GitHub Actions hace el procesamiento pesado. Chromium solo se abre cuando hay que capturar un gráfico; las consultas usan `ETag`/`Last-Modified`, el contenido repetido se descarta y el gráfico programado solo se envía cuando su firma cambia. Antes de renderizar, un control matemático rechaza fechas duplicadas, NaN/Infinity, series desalineadas, precisión inválida y rangos históricos incompletos.
 
 La alarma directa requiere los secretos `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` en Cloudflare. Solo se envía directamente para reportes nacionales con fecha reciente comprobable; las páginas sin fecha y las noticias extranjeras pasan por lectura y edición en Python. El intervalo de sondeo no garantiza entrega en un minuto: depende de la fuente y del arranque del procesamiento.
 

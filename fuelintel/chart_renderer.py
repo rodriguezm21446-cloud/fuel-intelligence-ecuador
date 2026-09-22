@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .market_math import validate_chart_payload
+
 
 CHART_JS_URLS = (
     "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js",
@@ -18,6 +20,7 @@ def build_chart_html(payload: dict, chart_js_url: str = CHART_JS_URLS[0]) -> str
     foreground = "#171717" if light else "#E8E8E8"
     muted = "#5F6368" if light else "#A7ADB4"
     axis = "#303030" if light else "#D1D5DB"
+    headline = "#1473B8" if light else "#8CC8FF"
     return f"""<!doctype html>
 <html lang="es">
 <head>
@@ -31,7 +34,7 @@ def build_chart_html(payload: dict, chart_js_url: str = CHART_JS_URLS[0]) -> str
     html, body {{ margin: 0; width: 1600px; height: 900px; overflow: hidden; background: {background}; }}
     body {{ color: {foreground}; font-family: Inter, Arial, sans-serif; font-variant-numeric: tabular-nums; }}
     main {{ width: 1600px; height: 900px; padding: 42px 60px 28px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; }}
-    h1 {{ margin: 0; font-size: 37px; line-height: 1.1; letter-spacing: -0.025em; }}
+    h1 {{ margin: 0; color: {headline}; font-size: 37px; line-height: 1.1; letter-spacing: -0.025em; }}
     .subtitle {{ margin-top: 8px; color: {muted}; font-size: 19px; }}
     .legend {{ display: flex; flex-wrap: wrap; gap: 24px; min-height: 28px; align-items: center; font-size: 16px; }}
     .legend-item {{ display: flex; gap: 9px; align-items: center; }}
@@ -39,10 +42,8 @@ def build_chart_html(payload: dict, chart_js_url: str = CHART_JS_URLS[0]) -> str
     .pending {{ border-top: 3px dashed #a7adb4; height: 0; }}
     .plot {{ position: relative; min-height: 0; margin: 0 110px 0 100px; overflow: visible; }}
     canvas {{ width: 100% !important; height: 100% !important; overflow: visible; }}
-    footer {{ min-height: 86px; display: grid; align-content: end; gap: 7px; }}
-    .insight {{ color: {foreground}; font-size: 17px; font-weight: 600; }}
-    .source {{ color: {muted}; font-size: 13px; }}
-    .credit {{ color: {foreground}; font-size: 13px; font-weight: 700; }}
+    footer {{ min-height: 34px; display: grid; align-content: end; }}
+    .source {{ color: {muted}; font-size: 14px; }}
   </style>
 </head>
 <body>
@@ -50,7 +51,7 @@ def build_chart_html(payload: dict, chart_js_url: str = CHART_JS_URLS[0]) -> str
   <header><h1 id="title"></h1><div class="subtitle" id="subtitle"></div></header>
   <div class="legend" id="legend"></div>
   <div class="plot"><canvas id="chart"></canvas></div>
-  <footer><div class="insight" id="insight"></div><div class="source" id="source"></div><div class="credit" id="credit"></div></footer>
+  <footer><div class="source" id="source"></div></footer>
 </main>
 <script>
 const P = {encoded};
@@ -62,9 +63,7 @@ const CHART_KIND = P.chartKind || (P.stepped ? 'step' : 'line');
 const formatValue = value => VALUE_PREFIX + Number(value).toFixed(DISPLAY_DECIMALS) + VALUE_SUFFIX;
 document.getElementById('title').textContent = P.title;
 document.getElementById('subtitle').textContent = P.subtitle;
-document.getElementById('insight').textContent = P.insight;
 document.getElementById('source').textContent = P.source;
-document.getElementById('credit').textContent = P.credit;
 const legend = document.getElementById('legend');
 for (const ds of P.datasets) {{
   if (ds.colorsBySign) {{
@@ -188,6 +187,7 @@ Promise.resolve(document.fonts.ready).then(() => {{ window.__chartReady = true; 
 def render_chart(payload: dict, destination: Path) -> Path:
     from playwright.sync_api import sync_playwright
 
+    validate_chart_payload(payload)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         try:
@@ -231,15 +231,15 @@ def build_heatmap_html(payload: dict) -> str:
 *{{box-sizing:border-box}}html,body{{margin:0;width:1600px;height:900px;background:#000;color:#e8e8e8}}
 body{{font-family:Inter,Arial,sans-serif;font-variant-numeric:tabular-nums}}
 main{{height:900px;padding:48px 78px 34px;display:grid;grid-template-rows:auto 1fr auto;gap:30px}}
-h1{{font-size:38px;margin:0 0 9px}}.sub,.source{{color:#a7adb4}}.sub{{font-size:19px}}
+h1{{font-size:38px;margin:0 0 9px;color:#8cc8ff}}.sub,.source{{color:#a7adb4}}.sub{{font-size:19px}}
 .grid{{display:grid;grid-template-columns:230px repeat(3,1fr);gap:8px;align-content:center}}
 .head,.name,.cell{{padding:23px 18px}}.head{{color:#a7adb4;font-weight:600;text-align:center}}
 .name{{font-size:21px;font-weight:700}}.cell{{font-size:26px;font-weight:700;text-align:center}}
-footer{{display:grid;gap:8px}}.note{{font-size:17px;font-weight:600}}.source{{font-size:13px}}.credit{{font-size:13px;font-weight:700}}
+footer{{display:grid}}.source{{font-size:14px}}
 </style></head><body><main><header><h1 id="title"></h1><div class="sub" id="subtitle"></div></header>
 <div class="grid" id="grid"><div></div><div class="head">1 sesión</div><div class="head">1 semana</div><div class="head">1 mes</div></div>
-<footer><div class="note" id="note"></div><div class="source" id="source"></div><div class="credit" id="credit"></div></footer></main>
-<script>const P={encoded}; title.textContent=P.title;subtitle.textContent=P.subtitle;note.textContent=P.insight;source.textContent=P.source;credit.textContent=P.credit;
+<footer><div class="source" id="source"></div></footer></main>
+<script>const P={encoded}; title.textContent=P.title;subtitle.textContent=P.subtitle;source.textContent=P.source;
 const color=v=>v===null?'#24272b':v>=5?'#236b43':v>=1?'#315b43':v<=-5?'#7a3030':v<=-1?'#613535':'#33363a';
 for(const row of P.rows){{const n=document.createElement('div');n.className='name';n.textContent=row.label;grid.append(n);for(const v of row.values){{const c=document.createElement('div');c.className='cell';c.style.background=color(v);c.textContent=v===null?'n/d':(v>=0?'+':'')+v.toFixed(2)+'%';grid.append(c)}}}}
 window.__chartReady=true;</script></body></html>"""
@@ -248,6 +248,7 @@ window.__chartReady=true;</script></body></html>"""
 def render_heatmap(payload: dict, destination: Path) -> Path:
     from playwright.sync_api import sync_playwright
 
+    validate_chart_payload(payload, heatmap=True)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         try:
