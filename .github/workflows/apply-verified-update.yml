@@ -14,8 +14,8 @@ jobs:
       - name: Apply verified source archive
         run: |
           tar -xzf fuelintel-update-20260922.tgz
+          git restore --source=HEAD -- .github/workflows/cloud-job.yml .github/workflows/watchdog.yml
           rm fuelintel-update-20260922.tgz
-          rm .github/workflows/apply-verified-update.yml
       - name: Commit verified update
         run: |
           git config user.name "github-actions[bot]"
