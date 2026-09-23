@@ -22,16 +22,22 @@ jobs:
           import json, os, urllib.request
           url = "https://fuelintel-ecuador.rodriguezm21446.workers.dev/health"
           healthy = False
+          details = "sin respuesta JSON"
           try:
               with urllib.request.urlopen(url, timeout=20) as response:
                   data = json.load(response)
-              healthy = data.get("status") == "ok" and bool(data.get("revision"))
-          except Exception:
-              pass
+              healthy = data.get("status") in {"ok", "partial"} and bool(data.get("revision"))
+              details = (
+                  f"estado={data.get('status', 'desconocido')}; "
+                  f"fuentes críticas={','.join(data.get('criticalUnavailableSources', [])) or 'ninguna'}; "
+                  f"fuentes parciales={','.join(data.get('unavailableSources', [])) or 'ninguna'}"
+              )
+          except Exception as error:
+              details = f"{type(error).__name__}: {error}"
           if not healthy:
               token, chat = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
               if token and chat:
-                  payload = json.dumps({"chat_id": chat, "text": "Aviso de combustibleEc: el monitor externo no confirma que el detector esté actualizado y sano. Puede haber retrasos o fuentes sin cobertura. Revisa Cloudflare /health."}).encode()
+                  payload = json.dumps({"chat_id": chat, "text": "Aviso técnico de combustibleEc: el detector requiere revisión. " + details + ". Las fuentes restantes continúan."}).encode()
                   request = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=payload, headers={"Content-Type": "application/json"})
                   try:
                       with urllib.request.urlopen(request, timeout=15) as response:
@@ -39,6 +45,6 @@ jobs:
                               print("Telegram no confirmó el aviso técnico")
                   except Exception:
                       print("No se pudo entregar el aviso técnico")
-              raise SystemExit("Detector no saludable o revisión anterior")
-          print("Detector saludable")
+              raise SystemExit("Detector no saludable: " + details)
+          print("Detector saludable: " + details)
           PY
