@@ -42,8 +42,8 @@ on:
         required: false
         type: string
   schedule:
-    # 18:17 en Ecuador (UTC−5); una ejecución diaria, sin repetición cada cinco horas.
-    - cron: "17 23 * * *"
+    # Revisa cinco veces al día; solo envía si corresponde por fecha o cambió la evidencia.
+    - cron: "17 0,5,10,15,20 * * *"
 
 permissions:
   contents: read
