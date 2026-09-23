@@ -33,26 +33,32 @@ class _Notifier:
 
 
 class DailyMarketTests(unittest.TestCase):
-    def test_scheduled_delivery_only_repeats_when_verified_data_changes(self):
+    def test_scheduled_delivery_sends_daily_and_repeats_only_on_verified_change(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             store = Store(root / "db.sqlite3")
             notifier = _Notifier()
-            settings = SimpleNamespace(data_dir=root, timezone=timezone(timedelta(hours=-5)), eia_api_key="")
+            settings = SimpleNamespace(
+                data_dir=root,
+                timezone=timezone(timedelta(hours=-5)),
+                eia_api_key="",
+                chart_revision="8",
+            )
             chart = root / "market.png"
             chart.write_bytes(b"png")
             sections = TelegramSections("Titular comprobado", "Contexto comprobado")
             bundle = ([('products', chart, 'same-data-signature')], sections, 'products', '2026-09-18')
-            changed = ([('products', chart, 'new-data-signature')], sections, 'products', '2026-09-19')
+            changed = ([('products', chart, 'new-data-signature')], sections, 'products', '2026-09-20')
             day_one = datetime(2026, 9, 20, 18, 17, tzinfo=settings.timezone)
             with patch("fuelintel.main.build_runtime", return_value=(store, None, notifier, None)), \
                  patch("fuelintel.main.national_data_signature", return_value=None), \
-                 patch("fuelintel.main.generate_market_bundle", side_effect=[bundle, bundle, changed]) as generated:
+                 patch("fuelintel.main.generate_market_bundle", side_effect=[bundle, bundle, bundle, changed]) as generated:
                 self.assertEqual(dashboard(settings, day_one), 0)
                 self.assertEqual(dashboard(settings, day_one + timedelta(hours=1)), 0)
                 self.assertEqual(dashboard(settings, day_one + timedelta(days=1)), 0)
-            self.assertEqual(generated.call_count, 3)
-            self.assertEqual(len(notifier.photos), 2)
+                self.assertEqual(dashboard(settings, day_one + timedelta(days=1, hours=1)), 0)
+            self.assertEqual(generated.call_count, 4)
+            self.assertEqual(len(notifier.photos), 3)
             self.assertIn("Último dato observado: 2026-09-18", notifier.photos[0][1])
             self.assertEqual(notifier.texts[:2], ["Titular comprobado", "Contexto comprobado"])
             self.assertEqual(notifier.texts[-2:], ["Titular comprobado", "Contexto comprobado"])

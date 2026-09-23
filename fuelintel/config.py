@@ -51,6 +51,7 @@ class Settings:
     eia_api_key: str
     gemini_api_key: str
     gemini_model: str
+    chart_revision: str
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -82,6 +83,7 @@ class Settings:
             eia_api_key=os.getenv("EIA_API_KEY", ""),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+            chart_revision=os.getenv("FUELINTEL_CHART_REVISION", "1").strip() or "1",
         )
 
     def validate_activation(self) -> None:
