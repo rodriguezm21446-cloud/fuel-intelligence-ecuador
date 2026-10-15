@@ -18,8 +18,19 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          token="$TELEGRAM_BOT_TOKEN"
+          chat="$TELEGRAM_CHAT_ID"
+          if [ -z "$token" ] || [ -z "$chat" ]; then
+            echo "ERROR: Faltan secretos TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID en el repositorio."
+            exit 1
+          fi
+
           python3 - <<'PY'
-          import json, os, urllib.request
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
           url = "https://fuelintel-ecuador.rodriguezm21446.workers.dev/health"
           healthy = False
           details = "sin respuesta JSON"
@@ -34,17 +45,30 @@ jobs:
               )
           except Exception as error:
               details = f"{type(error).__name__}: {error}"
+
           if not healthy:
               token, chat = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
               if token and chat:
-                  payload = json.dumps({"chat_id": chat, "text": "Aviso técnico de combustibleEc: el detector requiere revisión. " + details + ". Las fuentes restantes continúan."}).encode()
-                  request = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=payload, headers={"Content-Type": "application/json"})
+                  payload = json.dumps({
+                      "chat_id": chat,
+                      "text": "Aviso técnico de combustibleEc: el detector requiere revisión. " + details + ". Las fuentes restantes continúan."
+                  }).encode("utf-8")
+                  request = urllib.request.Request(
+                      f"https://api.telegram.org/bot{token}/sendMessage",
+                      data=payload,
+                      headers={"Content-Type": "application/json"},
+                  )
                   try:
                       with urllib.request.urlopen(request, timeout=15) as response:
-                          if not json.load(response).get("ok"):
+                          resp = response.read().decode("utf-8", errors="replace")
+                          print("Respuesta Telegram:", resp)
+                          if not json.loads(resp).get("ok"):
                               print("Telegram no confirmó el aviso técnico")
-                  except Exception:
-                      print("No se pudo entregar el aviso técnico")
+                  except urllib.error.HTTPError as exc:
+                      print(f"HTTPError al notificar Telegram: {exc.code} {exc.reason}")
+                  except Exception as exc:
+                      print("No se pudo entregar el aviso técnico:", exc)
               raise SystemExit("Detector no saludable: " + details)
+
           print("Detector saludable: " + details)
           PY
