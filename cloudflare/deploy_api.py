@@ -65,6 +65,7 @@ def multipart(worker_code: bytes, setup_key: str) -> tuple[bytes, str]:
             {"type": "d1", "name": "DB", "id": D1_DATABASE_ID},
             {"type": "plain_text", "name": "GITHUB_WORKFLOW", "text": "cloud-job.yml"},
             {"type": "plain_text", "name": "GITHUB_REF", "text": "main"},
+            {"type": "plain_text", "name": "GITHUB_REPOSITORY", "text": "rodriguezm21446-cloud/fuel-intelligence-ecuador"},
             {"type": "secret_text", "name": "SETUP_KEY", "text": setup_key},
         ],
         "annotations": {"workers/message": "Despliegue inicial seguro con línea base"},

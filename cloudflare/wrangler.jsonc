@@ -18,6 +18,7 @@
   ],
   "vars": {
     "GITHUB_WORKFLOW": "cloud-job.yml",
-    "GITHUB_REF": "main"
+    "GITHUB_REF": "main",
+    "GITHUB_REPOSITORY": "rodriguezm21446-cloud/fuel-intelligence-ecuador"
   }
 }
