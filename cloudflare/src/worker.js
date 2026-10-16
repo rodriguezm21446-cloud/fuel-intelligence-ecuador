@@ -610,15 +610,16 @@ export default {
     ).all();
     const events = await env.DB.prepare("SELECT status, COUNT(*) AS total FROM event_candidates GROUP BY status").all();
     const states = sources.results || [];
+    // A source the remote server blocks is reported, but is neither critical
+    // nor an outage, so it must not downgrade the service or wake the watchdog.
+    const mutedSet = new Set(states.filter(row => isMutedSource(row.source_id, row.last_error)).map(row => row.source_id));
     const unavailable = SOURCES.filter(source => {
+      if (mutedSet.has(source.id)) return false;
       const state = states.find(row => row.source_id === source.id);
       return !state || state.error_count >= 3 || !Number.isFinite(Date.parse(state.checked_at))
         || Date.now() - Date.parse(state.checked_at) > Math.max(600, source.pollSeconds * 3) * 1000;
     });
-    // A source the remote server blocks is reported, but is neither critical
-    // nor an outage, so it must not downgrade the service or wake the watchdog.
-    const mutedSet = new Set(states.filter(row => isMutedSource(row.source_id, row.last_error)).map(row => row.source_id));
-    const criticalUnavailable = unavailable.filter(source => source.critical && !mutedSet.has(source.id));
+    const criticalUnavailable = unavailable.filter(source => source.critical);
     const blockedSources = [...mutedSet].sort();
     const missingConfiguration = !env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY;
     return Response.json({
