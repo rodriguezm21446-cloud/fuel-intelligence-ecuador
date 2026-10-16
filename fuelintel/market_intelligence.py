@@ -14,7 +14,9 @@ from .anomalies import detect_anomalies
 from .chart_renderer import render_chart, render_heatmap
 from .charts import own_data_label
 from .formatting import TelegramSections
+from .knowledge import within_band
 from .market_math import percentage_change, validate_market_series
+from .quality import quarantine
 from .text import trim_x
 
 
@@ -110,8 +112,7 @@ def _plausible_market_series(name: str, rows: list[tuple[str, float]]) -> bool:
     if len(rows) < 30:
         return False
     recent = [value for _, value in rows[-20:]]
-    low, high = ((20.0, 250.0) if name in {"WTI", "Brent"} else (0.5, 10.0))
-    return all(low <= value <= high for value in recent)
+    return all(within_band(name, value) for value in recent)
 
 
 def estimate_direction(rows: list[tuple[str, float]], horizon: int = 5) -> MarketEstimate:
@@ -465,26 +466,57 @@ def build_crack_spread_payload(raw_series: dict[str, list[tuple[str, float]]]) -
     """
     wti = dict(raw_series.get("WTI", []))
     series: dict[str, list[tuple[str, float]]] = {}
-    for name, product in (("Crack gasolina", "RBOB"), ("Crack diésel", "ULSD")):
+    excluded: list[str] = []
+    for name, product, metric in (
+        ("Crack gasolina", "RBOB", "crack_gasolina"),
+        ("Crack diésel", "ULSD", "crack_diesel"),
+    ):
         leg = dict(raw_series.get(product, []))
         common = sorted(wti.keys() & leg.keys())[-60:]
-        if len(common) >= 2:
-            series[name] = [(day, leg[day] * GALLONS_PER_BARREL - wti[day]) for day in common]
+        computed = [(day, leg[day] * GALLONS_PER_BARREL - wti[day]) for day in common]
+        # A crack outside the historically sane band is far more likely a bad
+        # quote than a real margin, so the gate keeps it out of the chart.
+        gate = quarantine(metric, computed)
+        if len(gate.kept) >= 2:
+            series[name] = gate.kept
+        if gate.removed:
+            excluded.append(f"{name} excluido: {gate.reasons()}")
     if not series:
         return None
+    insight = "; ".join(
+        f"{name} al {datetime.fromisoformat(rows[-1][0]):%d/%m/%Y}: ${rows[-1][1]:.2f}/barril"
+        for name, rows in series.items()
+    ) + "."
+    if excluded:
+        insight += " " + " ".join(excluded) + "."
     payload = _series_payload(
         series,
         title="Margen de refino (crack spread) de referencia",
         subtitle="RBOB y ULSD contra WTI · proxy del costo de importar refinados · USD por barril",
-        insight="; ".join(
-            f"{name} al {datetime.fromisoformat(rows[-1][0]):%d/%m/%Y}: ${rows[-1][1]:.2f}/barril"
-            for name, rows in series.items()
-        ) + ".",
+        insight=insight,
         decimals=2, prefix="$", suffix="/bbl",
     )
     if payload:
         payload["zeroBaseline"] = True
     return payload
+
+
+def _leg_plausible(
+    wti: list[tuple[str, float]], product_rows: list[tuple[str, float]], metric: str
+) -> bool:
+    """Cross-check a product quote against WTI through its crack.
+
+    The absolute band alone cannot catch a bad refined quote, because the raw
+    per-gallon range is wide.  The implied crack is far more sensitive: if it
+    falls outside the sane refining-margin band, the quote is not trusted.  When
+    there is no WTI to cross-check against, the absolute band stands alone.
+    """
+    product = dict(product_rows)
+    crude = dict(wti)
+    common = sorted(product.keys() & crude.keys())
+    if not common:
+        return True
+    return within_band(metric, product[common[-1]] * GALLONS_PER_BARREL - crude[common[-1]])
 
 
 def build_price_gap_payload(
@@ -504,25 +536,33 @@ def build_price_gap_payload(
         (official_prices[key] for key in ("Diésel", "Diesel") if official_prices.get(key)),
         None,
     )
-    rbob = raw_series.get("RBOB", [])
-    ulsd = raw_series.get("ULSD", [])
+    wti = raw_series.get("WTI", [])
+    rbob = quarantine("RBOB", raw_series.get("RBOB", [])).kept
+    ulsd = quarantine("ULSD", raw_series.get("ULSD", [])).kept
     categories: list[str] = []
     regulated: list[float] = []
     reference: list[float] = []
-    if gasoline and rbob:
+    excluded: list[str] = []
+    if gasoline and rbob and _leg_plausible(wti, rbob, "crack_gasolina"):
         categories.append("Gasolina")
         regulated.append(round(float(gasoline), 2))
         reference.append(round(rbob[-1][1], 2))
-    if diesel and ulsd:
+    elif gasoline and rbob:
+        excluded.append("Gasolina excluida: la cotización internacional quedó fuera de rango")
+    if diesel and ulsd and _leg_plausible(wti, ulsd, "crack_diesel"):
         categories.append("Diésel")
         regulated.append(round(float(diesel), 2))
         reference.append(round(ulsd[-1][1], 2))
+    elif diesel and ulsd:
+        excluded.append("Diésel excluido: la cotización internacional quedó fuera de rango")
     if not categories:
         return None
     detail = "; ".join(
         f"{name}: oficial ${reg:.2f}/gal vs referencia ${ref:.2f}/gal ({reg - ref:+.2f})"
         for name, reg, ref in zip(categories, regulated, reference)
     )
+    if excluded:
+        detail += ". " + ". ".join(excluded)
     return {
         "title": "Brecha de referencia del precio de combustible",
         "subtitle": "Precio oficial de Ecuador frente a la cotización internacional del producto · USD por galón",

@@ -137,6 +137,28 @@ class DailyMarketTests(unittest.TestCase):
         self.assertAlmostEqual(payload["datasets"][0]["values"][0], 4.0)
         self.assertAlmostEqual(payload["datasets"][1]["values"][1], 27.2)
 
+    def test_crack_spread_omits_a_leg_whose_quote_is_out_of_range(self):
+        raw = {
+            "WTI": [("2026-09-14", 97.0), ("2026-09-15", 98.0)],
+            "RBOB": [("2026-09-14", 3.10), ("2026-09-15", 3.18)],
+            "ULSD": [("2026-09-14", 4.80), ("2026-09-15", 4.85)],
+        }
+        payload = build_crack_spread_payload(raw)
+        labels = [dataset["label"] for dataset in payload["datasets"]]
+        self.assertIn("Crack gasolina", labels)
+        self.assertNotIn("Crack diésel", labels)
+        self.assertIn("fuera del rango normal", payload["insight"])
+
+    def test_reference_gap_omits_a_product_whose_crack_is_out_of_range(self):
+        raw = {
+            "WTI": [("2026-09-15", 98.0)],
+            "RBOB": [("2026-09-15", 3.18)],
+            "ULSD": [("2026-09-15", 4.85)],
+        }
+        payload = build_price_gap_payload({"Extra": 2.40, "Diésel": 2.30}, raw)
+        self.assertEqual(payload["labels"], ["Gasolina"])
+        self.assertIn("Diésel excluido", payload["insight"])
+
     def test_reference_gap_is_same_unit_and_labelled_as_not_a_subsidy(self):
         raw = {"RBOB": [("2026-09-15", 2.10)], "ULSD": [("2026-09-15", 2.60)]}
         payload = build_price_gap_payload({"Extra": 2.40, "Diésel": 2.30}, raw)
