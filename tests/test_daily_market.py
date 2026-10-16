@@ -11,6 +11,7 @@ from fuelintel.formatting import TelegramSections
 from fuelintel.main import dashboard
 from fuelintel.market_intelligence import (
     build_brent_wti_spread_payload,
+    build_ecuador_production_payload,
     build_indexed_energy_payload,
     generate_market_bundle,
     select_event_chart_key,
@@ -86,6 +87,14 @@ class DailyMarketTests(unittest.TestCase):
     def test_news_can_choose_spread_and_relative_views(self):
         self.assertEqual(select_event_chart_key("Aumenta diferencial Brent-WTI"), "spread")
         self.assertEqual(select_event_chart_key("Comparación relativa entre combustibles"), "indexed")
+
+    def test_ecuador_production_payload_is_monthly_and_labelled_in_units(self):
+        payload = build_ecuador_production_payload([("2026-05", 459.0), ("2026-06", 460.0)])
+        self.assertEqual(payload["labels"], ["05/2026", "06/2026"])
+        self.assertEqual(payload["datasets"][0]["values"], [459, 460])
+        self.assertEqual(payload["displayDecimals"], 0)
+        self.assertEqual(payload["valueSuffix"], " mil b/d")
+        self.assertIsNone(build_ecuador_production_payload([("2026-06", 460.0)]))
 
     def test_daily_bundle_renders_only_selected_chart(self):
         raw = {

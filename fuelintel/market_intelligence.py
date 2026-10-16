@@ -321,6 +321,41 @@ def build_us_retail_payload(raw_series: dict[str, list[tuple[str, float]]]) -> d
     }
 
 
+def _month_label(period: str) -> str:
+    try:
+        return datetime.fromisoformat(f"{period}-01").strftime("%m/%Y")
+    except ValueError:
+        return period
+
+
+def build_ecuador_production_payload(rows: list[tuple[str, float]]) -> dict | None:
+    """Official monthly Ecuador crude oil production; never a fabricated series."""
+    series = [(period, value) for period, value in rows if value and value > 0][-60:]
+    if len(series) < 2:
+        return None
+    labels = [_month_label(period) for period, _ in series]
+    values = [round(value) for _, value in series]
+    return {
+        "title": "Producción de petróleo crudo en Ecuador",
+        "subtitle": "Promedio mensual oficial · miles de barriles por día (mil b/d)",
+        "labels": labels,
+        "datasets": [{"label": "Ecuador", "color": "#C69236", "values": values, "pending": False}],
+        "annotations": [],
+        "references": [{"label": "Ecuador", "color": "#C69236", "min": min(values), "max": max(values)}],
+        "chartKind": "line",
+        "stepped": False,
+        "insight": f"Último mes publicado: {labels[-1]} con {values[-1]:.0f} mil b/d.",
+        "source": (
+            "Fuente: U.S. Energy Information Administration (EIA) · "
+            f"Periodo: {labels[0]}–{labels[-1]}"
+        ),
+        "credit": own_data_label(),
+        "displayDecimals": 0,
+        "valuePrefix": "",
+        "valueSuffix": " mil b/d",
+    }
+
+
 def build_market_heatmap_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict | None:
     rows = []
     for name in ("WTI", "Brent", "RBOB", "ULSD"):
@@ -572,12 +607,17 @@ def generate_market_bundle(
 ) -> tuple[list[tuple[str, Path, str]], TelegramSections | None, str, str]:
     raw_series = load_market_series()
     us_retail: dict[str, list[tuple[str, float]]] = {}
+    ecuador_production: list[tuple[str, float]] = []
     if eia_api_key:
+        from .eia import fetch_ecuador_crude_production, fetch_us_retail_prices
         try:
-            from .eia import fetch_us_retail_prices
             us_retail = fetch_us_retail_prices(eia_api_key)
         except Exception:
             us_retail = {}
+        try:
+            ecuador_production = fetch_ecuador_crude_production(eia_api_key)
+        except Exception:
+            ecuador_production = []
     if warehouse_path is not None and raw_series:
         try:
             from .warehouse import save_market_history
@@ -595,6 +635,7 @@ def generate_market_bundle(
         ("indexed", build_indexed_energy_payload(raw_series)),
     ]
     retail_spec = next(((key, payload) for key, payload in specs if key == "us-retail" and payload), None)
+    production_payload = build_ecuador_production_payload(ecuador_production)
     all_specs = list(specs)
     if selected_only and focus == "heatmap":
         specs = []
@@ -619,6 +660,9 @@ def generate_market_bundle(
         # The official EIA weekly survey is an independent publication cadence;
         # its data signature prevents repeats when the survey has not changed.
         specs.append(retail_spec)
+    if selected_only and production_payload and all(key != "ecuador-production" for key, _ in specs):
+        # Monthly official publication; the signature prevents repeats.
+        specs.append(("ecuador-production", production_payload))
     destination_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[tuple[str, Path, str]] = []
     for key, payload in specs:

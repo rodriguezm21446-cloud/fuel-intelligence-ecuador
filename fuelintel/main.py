@@ -145,6 +145,7 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             "volatility": "Volatilidad realizada WTI y Brent", "heatmap": "Mapa de calor de combustibles",
             "weekly-moves": "Variación semanal de energía", "us-retail": "Precios minoristas oficiales de EE. UU.",
             "spread": "Diferencial Brent–WTI", "indexed": "Evolución relativa de energía",
+            "ecuador-production": "Producción de petróleo crudo de Ecuador",
         }
         observed_label = f"Último dato observado: {latest_close}" if latest_close else "Sin fecha de observación comprobable"
         for key, market_path, market_signature in market_artifacts:

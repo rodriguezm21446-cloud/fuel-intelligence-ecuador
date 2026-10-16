@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fuelintel.eia import fetch_us_retail_prices
+from fuelintel.eia import fetch_ecuador_crude_production, fetch_us_retail_prices
 
 
 class _Response:
@@ -41,6 +41,24 @@ class EiaTests(unittest.TestCase):
         self.assertEqual(rows["Gasolina regular"][-1], ("2026-09-14", 4.319))
         self.assertEqual(rows["Diésel"][-1], ("2026-09-14", 6.285))
         self.assertNotIn("Gasolina premium", rows)
+
+    def test_ecuador_crude_production_is_validated_and_sorted(self):
+        payload = {
+            "response": {
+                "data": [
+                    {"period": "2026-06", "value": "460"},
+                    {"period": "2026-05", "value": "459"},
+                    {"period": "2026-04", "value": "99999"},
+                    {"period": "bad", "value": "12"},
+                ]
+            }
+        }
+        with patch("urllib.request.urlopen", return_value=_Response(payload)):
+            rows = fetch_ecuador_crude_production("test-key")
+        self.assertEqual(rows, [("2026-05", 459.0), ("2026-06", 460.0)])
+
+    def test_ecuador_crude_production_without_key_is_empty(self):
+        self.assertEqual(fetch_ecuador_crude_production(""), [])
 
 
 if __name__ == "__main__":

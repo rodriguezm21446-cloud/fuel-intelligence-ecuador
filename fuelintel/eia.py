@@ -46,3 +46,43 @@ def fetch_us_retail_prices(api_key: str, timeout_seconds: int = 20, length: int 
         if name and len(period) == 10 and 0.5 <= value <= 15:
             output[name][period] = value
     return {name: sorted(rows.items()) for name, rows in output.items() if rows}
+
+
+def fetch_ecuador_crude_production(
+    api_key: str, timeout_seconds: int = 20, length: int = 60
+) -> list[tuple[str, float]]:
+    """Monthly Ecuador crude oil production (thousand barrels per day), EIA API v2.
+
+    Only the verified international route is used: activity=Production,
+    product=Crude oil including lease condensate, country=Ecuador. A missing key
+    or an implausible series returns nothing rather than a guess.
+    """
+    if not api_key.strip():
+        return []
+    query: list[tuple[str, str]] = [
+        ("api_key", api_key.strip()),
+        ("frequency", "monthly"),
+        ("data[0]", "value"),
+        ("facets[activityId][]", "1"),
+        ("facets[productId][]", "57"),
+        ("facets[countryRegionId][]", "ECU"),
+        ("sort[0][column]", "period"),
+        ("sort[0][direction]", "desc"),
+        ("length", str(length)),
+    ]
+    url = "https://api.eia.gov/v2/international/data/?" + urllib.parse.urlencode(query)
+    request = urllib.request.Request(url, headers={"User-Agent": "FuelIntelligenceEcuador/0.4"})
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    rows: list[tuple[str, float]] = []
+    for row in payload.get("response", {}).get("data", []):
+        period = str(row.get("period", ""))[:7]
+        try:
+            value = float(row.get("value"))
+        except (TypeError, ValueError):
+            continue
+        # Ecuador produces roughly 400-500 thousand barrels per day. A value far
+        # outside a broad sanity band means a wrong series, so it is refused.
+        if len(period) == 7 and period[4] == "-" and 1.0 <= value <= 5000.0:
+            rows.append((period, value))
+    return sorted(set(rows))
