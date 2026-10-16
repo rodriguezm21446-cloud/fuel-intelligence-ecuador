@@ -38,6 +38,17 @@ function freshness(publishedAt, detectedAt, hours = 2) {
   return age > hours * 3600_000 ? "stale" : "fresh";
 }
 
+function isBlockedError(value = "") {
+  // Government sites often refuse or silently drop datacenter traffic. That is
+  // not a code failure, so it must not raise the operator's technical alarm.
+  return /bloqueó|no respondió|HTTP (401|403|429|451)/i.test(String(value || ""));
+}
+
+function publishedMilliseconds(publishedAt, detectedAt) {
+  const parsed = Date.parse(publishedAt || "");
+  return Number.isFinite(parsed) ? parsed : Date.parse(detectedAt);
+}
+
 function nextPollSeconds(source, state) {
   const errors = Math.min(6, Math.max(0, Number(state?.error_count || 0)));
   return Math.min(3600, (source.pollSeconds || 60) * (2 ** errors));
@@ -431,7 +442,12 @@ async function pollSource(env, source, state, detectedAt) {
       // Navigation links often occupy the first half of a news page. Filter
       // before limiting, otherwise a relevant new article can be silently lost.
       const relevantCandidates = candidates.filter((candidate) => isRelevantCandidate(source, candidate));
-      for (const candidate of relevantCandidates.slice(0, 50)) {
+      // Deliver the newest publications first so a fresh item is never delayed
+      // behind an older one that changed in the same poll.
+      const ordered = [...relevantCandidates].sort(
+        (a, b) => publishedMilliseconds(b.publishedAt, detectedAt) - publishedMilliseconds(a.publishedAt, detectedAt)
+      );
+      for (const candidate of ordered.slice(0, 50)) {
         await saveCandidate(env, source, candidate, bootstrap, detectedAt);
       }
     }
@@ -442,7 +458,14 @@ async function pollSource(env, source, state, detectedAt) {
        body_hash=excluded.body_hash, checked_at=excluded.checked_at, error_count=0, last_error=NULL`
     ).bind(source.id, response.headers.get("etag"), response.headers.get("last-modified"), bodyHash, detectedAt).run();
   } catch (error) {
-    const message = `${error?.name || "Error"}: fallo de lectura o procesamiento; revisar la fuente`;
+    const status = Number(String(error?.message || "").match(/HTTP (\d+)/)?.[1]);
+    const refused = [401, 403, 429, 451].includes(status);
+    const timedOut = /timeout|abort/i.test(`${error?.name || ""} ${error?.message || ""}`);
+    const message = refused
+      ? `HTTP ${status}: el servidor bloqueó la lectura automática (reintento programado)`
+      : timedOut
+        ? "Sin respuesta: el servidor no respondió a la lectura automática desde el centro de datos (reintento programado)"
+        : `${error?.name || "Error"}: fallo de lectura o procesamiento; revisar la fuente`;
     await env.DB.prepare(
       `INSERT INTO source_state(source_id, body_hash, checked_at, error_count, last_error)
        VALUES (?, '', ?, 1, ?)
@@ -473,10 +496,15 @@ async function pollAll(env) {
 async function reportOperationalHealth(env, detectedAt) {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
   const failed = await env.DB.prepare(
-    "SELECT source_id FROM source_state WHERE error_count >= 3 AND source_id NOT LIKE '__monitor%'").all();
+    "SELECT source_id, last_error FROM source_state WHERE error_count >= 3 AND source_id NOT LIKE '__monitor%'").all();
   const backlog = await env.DB.prepare(
     "SELECT COUNT(*) AS total FROM event_candidates WHERE status = 'dispatch_failed' AND dispatch_attempts >= 4 AND julianday(detected_at) >= julianday('now', '-24 hours')").first();
-  const failedIds = (failed.results || []).map(row => row.source_id).sort();
+  // A blocked or timed-out source is reported in /health but never spams the
+  // operator: the technical alarm only covers sources that truly break.
+  const failedIds = (failed.results || [])
+    .filter(row => !isBlockedError(row.last_error))
+    .map(row => row.source_id)
+    .sort();
   const criticalSet = new Set(SOURCES.filter(source => source.critical).map(source => source.id));
   const criticalIds = failedIds.filter(id => criticalSet.has(id));
   const partialIds = failedIds.filter(id => !criticalSet.has(id));
@@ -552,13 +580,15 @@ export default {
         || Date.now() - Date.parse(state.checked_at) > Math.max(600, source.pollSeconds * 3) * 1000;
     });
     const criticalUnavailable = unavailable.filter(source => source.critical);
+    const blockedSources = states.filter(row => isBlockedError(row.last_error)).map(row => row.source_id).sort();
     const missingConfiguration = !env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY;
     return Response.json({
       service: "fuelintel-ecuador",
       status: missingConfiguration || criticalUnavailable.length ? "degraded" : (unavailable.length ? "partial" : "ok"),
-      revision: "reliability-2026-09-22",
+      revision: "reliability-2026-10-16",
       unavailableSources: unavailable.map(source => source.id),
       criticalUnavailableSources: criticalUnavailable.map(source => source.id),
+      blockedSources,
       directTelegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID),
       xEnabled: env.FUELINTEL_X_ENABLED === "true" && Boolean(env.X_BEARER_TOKEN),
       githubConfigured: Boolean(env.GITHUB_TOKEN && env.GITHUB_REPOSITORY),

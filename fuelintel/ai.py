@@ -50,6 +50,8 @@ class GeminiEditor:
             "No inventes cifras, fechas, causas, predicciones ni fuentes. Declara contradicciones o "
             "documentos oficiales pendientes. Explica primero qué pasó, luego la causa respaldada y finalmente "
             "el posible canal hacia Ecuador; si falta una causa comprobada, dilo literalmente. Escribe sin emojis. "
+            "Si se entregan DATOS INTERNOS VERIFICADOS, intégralos de forma fría y ordenada para explicar el "
+            "contexto ecuatoriano (hecho, causa respaldada si existe, canal hacia Ecuador); nunca inventes cifras. "
             "El análisis tendrá máximo 700 "
             f"caracteres y el texto para X máximo 280. {EDITORIAL_GUARDRAILS}\n\n"
             f"EVIDENCIA VERIFICADA:\n{evidence[:12000]}\n\n"

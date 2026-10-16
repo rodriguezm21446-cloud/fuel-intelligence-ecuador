@@ -51,6 +51,14 @@ def build_runtime(settings: Settings):
 
 def poll_source(source, poller: SourcePoller, pipeline: Pipeline, now: datetime) -> tuple[int, int]:
     candidates, bootstrap = poller.poll(source, now)
+    # Deliver the newest publications first so a fresh item is never delayed
+    # behind an older one that changed in the same poll. Items without a
+    # verifiable date fall back to the moment they were detected.
+    candidates = sorted(
+        candidates,
+        key=lambda candidate: candidate.published_at or candidate.detected_at,
+        reverse=True,
+    )
     processed = 0
     notified = 0
     for candidate in candidates:
@@ -119,6 +127,7 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             warehouse_path=settings.data_dir / "market-history.duckdb",
             eia_api_key=settings.eia_api_key,
             selected_only=True,
+            variety=True,
         )
     except Exception as error:
         store.record_chart_error("WF_06_CHART_GENERATOR", f"mercado: {type(error).__name__}: {error}")

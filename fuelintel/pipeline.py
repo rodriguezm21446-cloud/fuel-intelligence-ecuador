@@ -26,6 +26,7 @@ from .models import Candidate, Decision, PriceType, VerificationStatus
 from .sources import SourcePoller
 from .storage import Store
 from .telegram import TelegramNotifier
+from .text import canonical_url
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,9 +78,43 @@ class Pipeline:
             self.store.record_chart_error("WF_06_CHART_GENERATOR", f"evento: {type(error).__name__}: {error}")
             return False
 
-    def _review(self, evidence: str, fallback_x: str, purpose: str):
+    def _analysis_context(self, candidate: Candidate) -> str:
+        """Assemble locally verified data so the editor analyses instead of paraphrasing."""
+        lines: list[str] = []
+        try:
+            latest: dict[str, object] = {}
+            for row in self.store.recent_prices():
+                latest[row["product"]] = row
+            if latest:
+                lines.append("Precios oficiales de Ecuador registrados por el sistema:")
+                for product, row in latest.items():
+                    period = ""
+                    if row["effective_from"] and row["effective_to"]:
+                        period = f" (vigente del {row['effective_from']} al {row['effective_to']})"
+                    lines.append(f"- {product}: ${row['price']} por galón{period}")
+        except Exception:
+            pass
+        try:
+            related = self.store.recent_notified_market_news(hours=48, limit=4)
+            others = [
+                story
+                for story in related
+                if canonical_url(str(story.get("canonical_url") or "")) != canonical_url(candidate.url)
+            ]
+            if others:
+                lines.append("Otras noticias recientes ya verificadas (contexto, no causa):")
+                lines.extend(f"- Según {story['source_name']}: {story['title']}" for story in others[:3])
+        except Exception:
+            pass
+        return "\n".join(lines)
+
+    def _review(self, evidence: str, fallback_x: str, purpose: str, context: str = ""):
         if not self.editor:
             return None
+        if context:
+            evidence = (
+                f"{evidence}\n\nDATOS INTERNOS VERIFICADOS (puedes citarlos; no inventes otros):\n{context}"
+            )
         editorial = self.editor.review(evidence, fallback_x)
         self.store.record_ai_run(
             self.editor.model,
@@ -269,7 +304,7 @@ class Pipeline:
                         "Traduce y resume esta alerta al español sin añadir hechos. Es una sola fuente aún no corroborada.\n"
                         f"Fuente: {candidate.source.name}\nTexto: {candidate.summary or candidate.title}"
                     )
-                    editorial = self._review(evidence, candidate.title, "early-news")
+                    editorial = self._review(evidence, candidate.title, "early-news", self._analysis_context(candidate))
                 if initial_score >= 18:
                     self._send_event_chart(item_id, candidate, local_now)
                 early_warning_sent = self._send_sections(
@@ -310,6 +345,7 @@ class Pipeline:
                 fallback,
                 compose_x_prices(prices, changes, candidate.source.name),
                 "official-prices",
+                self._analysis_context(candidate),
             )
             forecast_messages: list[str] = []
             for item in prices:
@@ -358,7 +394,7 @@ class Pipeline:
                 return ProcessResult(decision.status, False, item_id, "línea base guardada sin notificar")
             fallback = format_news_alert(candidate, local_now, corroborated, sent_local=sent_local)
             fallback_x = fallback.split("TEXTO PARA X:\n", 1)[-1].split("\n\nFuente:", 1)[0]
-            editorial = self._review(fallback, fallback_x, "verified-news")
+            editorial = self._review(fallback, fallback_x, "verified-news", self._analysis_context(candidate))
             sections = build_news_sections(candidate, local_now, corroborated, editorial, sent_local)
             if initial_score >= 18:
                 self._send_event_chart(item_id, candidate, local_now)

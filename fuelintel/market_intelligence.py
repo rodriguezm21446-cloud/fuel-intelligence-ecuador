@@ -568,7 +568,7 @@ def generate_event_market_chart(text: str, destination: Path) -> Path | None:
 
 def generate_market_bundle(
     destination_dir: Path, related_news: list[dict] | None = None, warehouse_path: Path | None = None,
-    eia_api_key: str = "", selected_only: bool = False,
+    eia_api_key: str = "", selected_only: bool = False, variety: bool = False,
 ) -> tuple[list[tuple[str, Path, str]], TelegramSections | None, str, str]:
     raw_series = load_market_series()
     us_retail: dict[str, list[tuple[str, float]]] = {}
@@ -595,12 +595,26 @@ def generate_market_bundle(
         ("indexed", build_indexed_energy_payload(raw_series)),
     ]
     retail_spec = next(((key, payload) for key, payload in specs if key == "us-retail" and payload), None)
+    all_specs = list(specs)
     if selected_only and focus == "heatmap":
         specs = []
     elif selected_only:
         preferred = next(((key, payload) for key, payload in specs if key == focus and payload), None)
         fallback = next(((key, payload) for key, payload in specs if payload), None)
         specs = [preferred or fallback] if preferred or fallback else []
+        if variety:
+            # Add one complementary view per day so the summary stays varied
+            # without flooding the operator: the rotation is date-driven and
+            # never repeats the focus. AI never chooses this.
+            chosen = {key for key, _ in specs}
+            alternatives = [
+                (key, payload)
+                for key, payload in all_specs
+                if payload and key not in chosen and key != "us-retail"
+            ]
+            if alternatives:
+                offset = datetime.now(ECUADOR_TZ).timetuple().tm_yday % len(alternatives)
+                specs.append(alternatives[offset])
     if selected_only and retail_spec and all(key != "us-retail" for key, _ in specs):
         # The official EIA weekly survey is an independent publication cadence;
         # its data signature prevents repeats when the survey has not changed.
