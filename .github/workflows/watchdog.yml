@@ -24,7 +24,11 @@ jobs:
           healthy = False
           details = "sin respuesta JSON"
           try:
-              with urllib.request.urlopen(url, timeout=20) as response:
+              # Cloudflare rejects the default python-urllib agent, so identify clearly.
+              request = urllib.request.Request(
+                  url, headers={"User-Agent": "FuelIntelligenceEcuador/0.1 (+private monitor watchdog)"}
+              )
+              with urllib.request.urlopen(request, timeout=20) as response:
                   data = json.load(response)
               healthy = data.get("status") in {"ok", "partial"} and bool(data.get("revision"))
               details = (
