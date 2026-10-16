@@ -43,7 +43,7 @@ function freshness(publishedAt, detectedAt, hours = 2) {
 function isBlockedError(value = "") {
   // A blocked or dropped connection is not a code failure, so it must not
   // raise the operator's technical alarm.
-  return /bloqueó|no respondió|HTTP (401|403|429|451)/i.test(String(value || ""));
+  return /bloqueó|no respondió|HTTP (401|403|429|451|500|502|503|504)/i.test(String(value || ""));
 }
 
 // Ecuadorian official sites routinely refuse, throttle or return challenge
@@ -495,7 +495,9 @@ async function pollSource(env, source, state, detectedAt) {
   } catch (error) {
     const status = Number(String(error?.message || "").match(/HTTP (\d+)/)?.[1]);
     const detail = String(error?.message || "").slice(0, 120);
-    const refused = [401, 403, 429, 451].includes(status);
+    // Upstream 5xx is throttling/unavailability on the remote side, never a
+    // code failure, so it is reported but must not page the operator.
+    const refused = [401, 403, 429, 451, 500, 502, 503, 504].includes(status);
     const timedOut = /timeout|abort/i.test(`${error?.name || ""} ${detail}`);
     const message = refused
       ? `HTTP ${status}: el servidor bloqueó la lectura automática (reintento programado)`
