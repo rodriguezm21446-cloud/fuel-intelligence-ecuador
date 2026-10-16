@@ -106,6 +106,23 @@ class ChartTests(unittest.TestCase):
             with patch("fuelintel.charts.render_chart", return_value=destination):
                 self.assertEqual(generate_dashboard(store, destination, datetime.now(timezone.utc)), destination)
 
+    def test_default_national_chart_shows_up_to_a_year_of_official_history(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            for month in range(1, 7):
+                store.save_price(
+                    FuelPrice(
+                        "Extra",
+                        Decimal("2.400") + Decimal(month) / 100,
+                        period=EffectivePeriod(date(2026, month, 1), date(2026, month, 28)),
+                        source_url="https://example.test",
+                        price_type=PriceType.PUBLICO,
+                        source_name="ARCH",
+                    )
+                )
+            payload = build_national_payload(store)
+            self.assertEqual(len(payload["labels"]), 6)
+
     def test_market_payload_is_sentence_case_and_not_smoothed(self):
         payload = build_market_payload(
             {"WTI": [("2026-08-03", 70.0), ("2026-08-10", 71.0)], "Brent": [("2026-08-03", 74.0), ("2026-08-10", 75.0)]}

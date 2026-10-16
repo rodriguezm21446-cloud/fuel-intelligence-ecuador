@@ -81,7 +81,7 @@ def _combine_extra_ecopais(grouped: dict[str, list]) -> dict[str, list]:
     return grouped
 
 
-def build_national_payload(store: Store, range_limit: int | None = 4) -> dict | None:
+def build_national_payload(store: Store, range_limit: int | None = 12) -> dict | None:
     rows = store.recent_prices(limit_per_product=10000 if range_limit is None else 24)
     if not rows:
         return None
