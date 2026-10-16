@@ -34,6 +34,20 @@ class _Notifier:
         return True
 
 
+class _FlakyNotifier(_Notifier):
+    """Fails the very first text delivery, then behaves normally."""
+
+    def __init__(self):
+        super().__init__()
+        self.fail_next = True
+
+    def send_text(self, message):
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("fallo simulado de Telegram")
+        return super().send_text(message)
+
+
 class DailyMarketTests(unittest.TestCase):
     def test_scheduled_delivery_sends_daily_and_repeats_only_on_verified_change(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -64,6 +78,27 @@ class DailyMarketTests(unittest.TestCase):
             self.assertIn("Último dato observado: 2026-09-18", notifier.photos[0][1])
             self.assertEqual(notifier.texts[:2], ["Titular comprobado", "Contexto comprobado"])
             self.assertEqual(notifier.texts[-2:], ["Titular comprobado", "Contexto comprobado"])
+
+    def test_failed_squawk_does_not_swallow_the_remaining_sections(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            store = Store(root / "db.sqlite3")
+            notifier = _FlakyNotifier()
+            settings = SimpleNamespace(
+                data_dir=root,
+                timezone=timezone(timedelta(hours=-5)),
+                eia_api_key="",
+                chart_revision="1",
+            )
+            chart = root / "market.png"
+            chart.write_bytes(b"png")
+            sections = TelegramSections("Squawk corto", "Contexto verificado")
+            bundle = ([('products', chart, 'sig')], sections, 'products', '2026-09-18')
+            with patch("fuelintel.main.build_runtime", return_value=(store, None, notifier, None)), \
+                 patch("fuelintel.main.national_data_signature", return_value=None), \
+                 patch("fuelintel.main.generate_market_bundle", return_value=bundle):
+                self.assertEqual(dashboard(settings, datetime(2026, 9, 20, 18, 0, tzinfo=settings.timezone)), 0)
+            self.assertEqual(notifier.texts, ["Contexto verificado"])
 
     def test_spread_uses_only_dates_shared_by_both_markets(self):
         raw = {

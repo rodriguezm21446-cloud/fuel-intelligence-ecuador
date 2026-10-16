@@ -134,10 +134,13 @@ class Pipeline:
             try:
                 accepted = self.notifier.send_text(message)
             except Exception as error:
+                # A failure on one section must not stop the others; the failed
+                # part stays undelivered and is retried, the rest still goes out.
                 self.store.record_pipeline_stage(
                     "WF_08_ERROR_MONITOR", "telegram_section_error", f"{section}: {type(error).__name__}: {error}"
                 )
-                return False
+                delivered = False
+                continue
             if not accepted:
                 delivered = False
                 continue

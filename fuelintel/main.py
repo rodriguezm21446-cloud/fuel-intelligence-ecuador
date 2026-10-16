@@ -177,8 +177,18 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
                 LOG.exception("falló el envío programado del gráfico %s", key)
                 return 2
         if sent_market_chart and market_sections:
-            for message in market_sections.messages():
-                notifier.send_text(message)
+            for index, message in enumerate(market_sections.messages()):
+                # Each squawk is an independent message. One failed delivery must
+                # never swallow the remaining sections, so every send is isolated.
+                try:
+                    notifier.send_text(message)
+                except Exception as error:
+                    store.record_pipeline_stage(
+                        "WF_08_ERROR_MONITOR",
+                        "market_section_error",
+                        f"text-{index}: {type(error).__name__}: {error}",
+                    )
+                    LOG.exception("falló el envío de una sección del resumen de mercado")
         if latest_close:
             store.set_meta("last_market_observation", latest_close)
         if not sent_market_chart:

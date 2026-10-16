@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fuelintel.filters import relevance_score
+from fuelintel.formatting import TelegramSections
 from fuelintel.models import Candidate, SourceSpec, VerificationStatus
 from fuelintel.pipeline import Pipeline
 from fuelintel.sources import parse_rss
@@ -95,6 +96,22 @@ class ReliabilityTests(unittest.TestCase):
         retry = self.pipeline().process(candidate)
         self.assertTrue(retry.notified)
         self.assertEqual(len(self.notifier.messages), 2)
+
+    def test_middle_section_failure_still_sends_the_last_section(self):
+        pipeline = self.pipeline()
+        sections = TelegramSections("uno", "dos", "tres")
+        attempted: list[str] = []
+
+        def flaky(message):
+            attempted.append(message)
+            if message == "dos":
+                raise RuntimeError("fallo en la sección intermedia")
+            return True
+
+        with patch.object(self.notifier, "send_text", side_effect=flaky):
+            delivered = pipeline._send_sections(item_id=1, sections=sections)
+        self.assertFalse(delivered)
+        self.assertEqual(attempted, ["uno", "dos", "tres"])
 
 
 class EcuadorEnergyRelevanceTests(unittest.TestCase):
