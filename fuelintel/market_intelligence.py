@@ -24,7 +24,10 @@ MATTE = {
     "Brent": "#D8D5CE",
     "RBOB": "#A88452",
     "ULSD": "#6C8FB3",
+    "Crack gasolina": "#A88452",
+    "Crack diésel": "#6C8FB3",
 }
+GALLONS_PER_BARREL = 42
 RETAIL_COLORS = {
     "Gasolina regular": "#9A9285",
     "Gasolina premium": "#D8D5CE",
@@ -384,6 +387,97 @@ def build_ecuador_crude_exports_payload(rows: list[tuple[str, float]]) -> dict |
     }
 
 
+def build_crack_spread_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict | None:
+    """US refining margin as an honest proxy for the cost of importing refined fuel.
+
+    Gasoline crack = RBOB (USD/galón) × 42 − WTI (USD/barril); diesel crack =
+    ULSD × 42 − WTI. Only dates where both legs exist are joined. It is a proxy:
+    it is not Ecuador's real import cost.
+    """
+    wti = dict(raw_series.get("WTI", []))
+    series: dict[str, list[tuple[str, float]]] = {}
+    for name, product in (("Crack gasolina", "RBOB"), ("Crack diésel", "ULSD")):
+        leg = dict(raw_series.get(product, []))
+        common = sorted(wti.keys() & leg.keys())[-60:]
+        if len(common) >= 2:
+            series[name] = [(day, leg[day] * GALLONS_PER_BARREL - wti[day]) for day in common]
+    if not series:
+        return None
+    payload = _series_payload(
+        series,
+        title="Margen de refino (crack spread) de referencia",
+        subtitle="RBOB y ULSD contra WTI · proxy del costo de importar refinados · USD por barril",
+        insight="; ".join(
+            f"{name} al {datetime.fromisoformat(rows[-1][0]):%d/%m/%Y}: ${rows[-1][1]:.2f}/barril"
+            for name, rows in series.items()
+        ) + ".",
+        decimals=2, prefix="$", suffix="/bbl",
+    )
+    if payload:
+        payload["zeroBaseline"] = True
+    return payload
+
+
+def build_price_gap_payload(
+    official_prices: dict[str, float], raw_series: dict[str, list[tuple[str, float]]]
+) -> dict | None:
+    """Measured gap between Ecuador's regulated price and the international product.
+
+    Both sides are USD per gallon, so it is an honest same-unit comparison. It
+    adds no freight, taxes, margins or subsidies and therefore is NOT a computed
+    fiscal-gap figure; the label says so. Published only when both sides exist.
+    """
+    gasoline = next(
+        (official_prices[key] for key in ("Extra", "Súper", "Super", "Premium", "Gasolina") if official_prices.get(key)),
+        None,
+    )
+    diesel = next(
+        (official_prices[key] for key in ("Diésel", "Diesel") if official_prices.get(key)),
+        None,
+    )
+    rbob = raw_series.get("RBOB", [])
+    ulsd = raw_series.get("ULSD", [])
+    categories: list[str] = []
+    regulated: list[float] = []
+    reference: list[float] = []
+    if gasoline and rbob:
+        categories.append("Gasolina")
+        regulated.append(round(float(gasoline), 2))
+        reference.append(round(rbob[-1][1], 2))
+    if diesel and ulsd:
+        categories.append("Diésel")
+        regulated.append(round(float(diesel), 2))
+        reference.append(round(ulsd[-1][1], 2))
+    if not categories:
+        return None
+    detail = "; ".join(
+        f"{name}: oficial ${reg:.2f}/gal vs referencia ${ref:.2f}/gal ({reg - ref:+.2f})"
+        for name, reg, ref in zip(categories, regulated, reference)
+    )
+    return {
+        "title": "Brecha de referencia del precio de combustible",
+        "subtitle": "Precio oficial de Ecuador frente a la cotización internacional del producto · USD por galón",
+        "labels": categories,
+        "datasets": [
+            {"label": "Oficial Ecuador", "color": "#C69236", "values": regulated, "pending": False},
+            {"label": "Referencia internacional", "color": "#6C8FB3", "values": reference, "pending": False},
+        ],
+        "annotations": [],
+        "references": [
+            {"label": "Oficial Ecuador", "color": "#C69236", "min": min(regulated), "max": max(regulated)},
+            {"label": "Referencia internacional", "color": "#6C8FB3", "min": min(reference), "max": max(reference)},
+        ],
+        "chartKind": "bar",
+        "zeroBaseline": True,
+        "insight": detail + ". Diferencia medida; no incluye impuestos, subsidios, flete ni márgenes.",
+        "source": "Fuente: precio oficial de Ecuador + cotizaciones internacionales (Yahoo Finance)",
+        "credit": own_data_label(),
+        "displayDecimals": 2,
+        "valuePrefix": "$",
+        "valueSuffix": "/gal",
+    }
+
+
 def build_market_heatmap_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict | None:
     rows = []
     for name in ("WTI", "Brent", "RBOB", "ULSD"):
@@ -633,6 +727,7 @@ def generate_market_bundle(
     destination_dir: Path, related_news: list[dict] | None = None, warehouse_path: Path | None = None,
     eia_api_key: str = "", selected_only: bool = False, variety: bool = False,
     bce_exports: list[tuple[str, float]] | None = None,
+    official_prices: dict[str, float] | None = None,
 ) -> tuple[list[tuple[str, Path, str]], TelegramSections | None, str, str]:
     raw_series = load_market_series()
     us_retail: dict[str, list[tuple[str, float]]] = {}
@@ -696,6 +791,14 @@ def generate_market_bundle(
     if selected_only and exports_payload and all(key != "ecuador-exports" for key, _ in specs):
         # Monthly official publication; the signature prevents repeats.
         specs.append(("ecuador-exports", exports_payload))
+    crack_payload = build_crack_spread_payload(raw_series)
+    if selected_only and crack_payload and all(key != "crack-spread" for key, _ in specs):
+        # Daily-changing cost-of-importing proxy; the signature prevents repeats.
+        specs.append(("crack-spread", crack_payload))
+    gap_payload = build_price_gap_payload(official_prices or {}, raw_series)
+    if selected_only and gap_payload and all(key != "price-gap" for key, _ in specs):
+        # Changes only when the regulated price moves; the signature prevents repeats.
+        specs.append(("price-gap", gap_payload))
     destination_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[tuple[str, Path, str]] = []
     for key, payload in specs:

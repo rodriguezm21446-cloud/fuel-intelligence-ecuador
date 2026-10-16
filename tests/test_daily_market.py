@@ -11,9 +11,11 @@ from fuelintel.formatting import TelegramSections
 from fuelintel.main import dashboard
 from fuelintel.market_intelligence import (
     build_brent_wti_spread_payload,
+    build_crack_spread_payload,
     build_ecuador_crude_exports_payload,
     build_ecuador_production_payload,
     build_indexed_energy_payload,
+    build_price_gap_payload,
     generate_market_bundle,
     select_event_chart_key,
 )
@@ -120,6 +122,29 @@ class DailyMarketTests(unittest.TestCase):
         self.assertAlmostEqual(payload["datasets"][1]["values"][1], 110.0)
         self.assertIn("Base 100", payload["subtitle"])
 
+    def test_crack_spread_converts_gallons_to_barrels_on_shared_dates(self):
+        raw = {
+            "WTI": [("2026-09-14", 80.0), ("2026-09-15", 82.0)],
+            "RBOB": [("2026-09-14", 2.0), ("2026-09-15", 2.1)],
+            "ULSD": [("2026-09-14", 2.5), ("2026-09-15", 2.6)],
+        }
+        payload = build_crack_spread_payload(raw)
+        self.assertEqual(payload["valueSuffix"], "/bbl")
+        self.assertEqual(payload["labels"], ["14/09/2026", "15/09/2026"])
+        self.assertEqual(payload["datasets"][0]["label"], "Crack gasolina")
+        self.assertAlmostEqual(payload["datasets"][0]["values"][0], 4.0)
+        self.assertAlmostEqual(payload["datasets"][1]["values"][1], 27.2)
+
+    def test_reference_gap_is_same_unit_and_labelled_as_not_a_subsidy(self):
+        raw = {"RBOB": [("2026-09-15", 2.10)], "ULSD": [("2026-09-15", 2.60)]}
+        payload = build_price_gap_payload({"Extra": 2.40, "Diésel": 2.30}, raw)
+        self.assertEqual(payload["valueSuffix"], "/gal")
+        self.assertEqual(payload["labels"], ["Gasolina", "Diésel"])
+        self.assertEqual(payload["datasets"][0]["values"], [2.40, 2.30])
+        self.assertEqual(payload["datasets"][1]["values"], [2.10, 2.60])
+        self.assertIn("no incluye impuestos", payload["insight"])
+        self.assertIsNone(build_price_gap_payload({}, raw))
+
     def test_news_can_choose_spread_and_relative_views(self):
         self.assertEqual(select_event_chart_key("Aumenta diferencial Brent-WTI"), "spread")
         self.assertEqual(select_event_chart_key("Comparación relativa entre combustibles"), "indexed")
@@ -169,6 +194,24 @@ class DailyMarketTests(unittest.TestCase):
                 Path(folder), selected_only=True, bce_exports=exports
             )
         self.assertIn("ecuador-exports", [item[0] for item in artifacts])
+
+    def test_daily_bundle_appends_crack_spread_and_reference_gap(self):
+        raw = {
+            "WTI": [("2026-09-14", 80.0), ("2026-09-15", 82.0)],
+            "Brent": [("2026-09-14", 84.0), ("2026-09-15", 85.0)],
+            "RBOB": [("2026-09-14", 2.0), ("2026-09-15", 2.1)],
+            "ULSD": [("2026-09-14", 2.5), ("2026-09-15", 2.6)],
+        }
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("fuelintel.market_intelligence.load_market_series", return_value=raw), \
+             patch("fuelintel.market_intelligence.choose_market_focus", return_value="crude"), \
+             patch("fuelintel.market_intelligence.render_chart", side_effect=lambda payload, path: path):
+            artifacts, _, _, _ = generate_market_bundle(
+                Path(folder), selected_only=True, official_prices={"Extra": 2.4, "Diésel": 2.3}
+            )
+        keys = [item[0] for item in artifacts]
+        self.assertIn("crack-spread", keys)
+        self.assertIn("price-gap", keys)
 
 
 if __name__ == "__main__":

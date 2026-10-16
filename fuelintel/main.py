@@ -127,6 +127,11 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
         except Exception:
             LOG.exception("no se pudieron leer las exportaciones de crudo del BCE")
             bce_exports = []
+        try:
+            official_prices = {str(row["product"]): float(row["price"]) for row in store.recent_prices()}
+        except Exception:
+            LOG.exception("no se pudieron leer los precios oficiales para la brecha")
+            official_prices = {}
         market_artifacts, market_sections, market_focus, latest_close = generate_market_bundle(
             settings.data_dir / "charts" / "market-close",
             related_news=related_news,
@@ -135,6 +140,7 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             selected_only=True,
             variety=True,
             bce_exports=bce_exports,
+            official_prices=official_prices,
         )
     except Exception as error:
         store.record_chart_error("WF_06_CHART_GENERATOR", f"mercado: {type(error).__name__}: {error}")
@@ -154,6 +160,8 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             "spread": "Diferencial Brent–WTI", "indexed": "Evolución relativa de energía",
             "ecuador-production": "Producción de petróleo crudo de Ecuador",
             "ecuador-exports": "Exportaciones de crudo de Ecuador",
+            "crack-spread": "Margen de refino (crack spread)",
+            "price-gap": "Brecha de referencia del precio",
         }
         observed_label = f"Último dato observado: {latest_close}" if latest_close else "Sin fecha de observación comprobable"
         for key, market_path, market_signature in market_artifacts:
