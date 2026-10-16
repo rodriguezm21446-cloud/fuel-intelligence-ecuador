@@ -4,7 +4,11 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fuelintel.eia import fetch_ecuador_crude_production, fetch_us_retail_prices
+from fuelintel.eia import (
+    fetch_ecuador_crude_production,
+    fetch_us_retail_prices,
+    fetch_us_weekly_inventory,
+)
 
 
 class _Response:
@@ -59,6 +63,27 @@ class EiaTests(unittest.TestCase):
 
     def test_ecuador_crude_production_without_key_is_empty(self):
         self.assertEqual(fetch_ecuador_crude_production(""), [])
+
+    def test_us_weekly_inventory_is_validated_and_sorted(self):
+        payload = {
+            "response": {
+                "data": [
+                    {"series": "WCRSTUS1", "period": "2026-09-11", "value": "858500"},
+                    {"series": "WCRSTUS1", "period": "2026-09-04", "value": "854700"},
+                    {"series": "WGTSTUS1", "period": "2026-09-11", "value": "249500"},
+                    {"series": "WCRSTUS1", "period": "2026-09-01", "value": "1"},
+                    {"series": "DESCONOCIDA", "period": "2026-09-11", "value": "500000"},
+                ]
+            }
+        }
+        with patch("urllib.request.urlopen", return_value=_Response(payload)):
+            rows = fetch_us_weekly_inventory("test-key")
+        self.assertEqual(rows["Crudo"], [("2026-09-04", 854700.0), ("2026-09-11", 858500.0)])
+        self.assertEqual(rows["Gasolina"], [("2026-09-11", 249500.0)])
+        self.assertNotIn("Diésel", rows)
+
+    def test_us_weekly_inventory_without_key_is_empty(self):
+        self.assertEqual(fetch_us_weekly_inventory(""), {})
 
 
 if __name__ == "__main__":

@@ -162,6 +162,7 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             "ecuador-exports": "Exportaciones de crudo de Ecuador",
             "crack-spread": "Margen de refino (crack spread)",
             "price-gap": "Brecha de referencia del precio",
+            "us-inventory": "Inventarios semanales de petróleo en EE. UU.",
         }
         observed_label = f"Último dato observado: {latest_close}" if latest_close else "Sin fecha de observación comprobable"
         for key, market_path, market_signature in market_artifacts:

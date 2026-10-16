@@ -324,6 +324,75 @@ def build_us_retail_payload(raw_series: dict[str, list[tuple[str, float]]]) -> d
     }
 
 
+INVENTORY_COLORS = {
+    "Crudo": "#C69236",
+    "Gasolina": "#A88452",
+    "Diésel": "#6C8FB3",
+}
+
+
+def _weekly_change(rows: list[tuple[str, float]]) -> float | None:
+    if len(rows) >= 2 and rows[-2][1]:
+        return (rows[-1][1] - rows[-2][1]) / rows[-2][1] * 100
+    return None
+
+
+def inventory_is_notable(rows_by_name: dict[str, list[tuple[str, float]]], threshold_percent: float = 1.5) -> bool:
+    """Publish the weekly inventory only when a real week-over-week move happened.
+
+    A calm feed does not repeat a flat series every Wednesday. The threshold is
+    explicit and applied to observed values only.
+    """
+    biggest = 0.0
+    for rows in rows_by_name.values():
+        change = _weekly_change(rows)
+        if change is not None:
+            biggest = max(biggest, abs(change))
+    return biggest >= threshold_percent
+
+
+def build_us_inventory_payload(rows_by_name: dict[str, list[tuple[str, float]]]) -> dict | None:
+    """Official weekly U.S. petroleum stocks; measured, never fabricated."""
+    series = {name: rows[-52:] for name, rows in rows_by_name.items() if len(rows) >= 2}
+    if not series:
+        return None
+    labels = sorted({day for rows in series.values() for day, _ in rows})
+    datasets, references = [], []
+    for name, rows in series.items():
+        by_date = dict(rows)
+        color = INVENTORY_COLORS.get(name, "#8A8A8A")
+        datasets.append({"label": name, "color": color, "values": [by_date.get(day) for day in labels], "pending": False})
+        values = [value for _, value in rows]
+        references.append({"label": name, "color": color, "min": min(values), "max": max(values)})
+    rendered = [datetime.fromisoformat(day).strftime("%d/%m/%Y") for day in labels]
+    changes = "; ".join(
+        f"{name} {change:+.1f}% sem."
+        for name, rows in series.items()
+        if (change := _weekly_change(rows)) is not None
+    )
+    return {
+        "title": "Inventarios semanales de petróleo en EE. UU.",
+        "subtitle": "Reporte oficial semanal (WPSR) · miles de barriles · crudo, gasolina y diésel",
+        "labels": rendered,
+        "datasets": datasets,
+        "annotations": [],
+        "references": references,
+        "chartKind": "line",
+        "stepped": False,
+        "insight": (
+            (changes or "Sin variación comparable semanal.")
+            + " Variación semanal medida; es costo aguas arriba, no el precio local de Ecuador."
+        ),
+        "source": _source_line(
+            rendered, "U.S. Energy Information Administration (EIA)", "publicación semanal"
+        ),
+        "credit": own_data_label(),
+        "displayDecimals": 0,
+        "valuePrefix": "",
+        "valueSuffix": " mil bbl",
+    }
+
+
 def _month_label(period: str) -> str:
     try:
         return datetime.fromisoformat(f"{period}-01").strftime("%m/%Y")
@@ -732,8 +801,9 @@ def generate_market_bundle(
     raw_series = load_market_series()
     us_retail: dict[str, list[tuple[str, float]]] = {}
     ecuador_production: list[tuple[str, float]] = []
+    us_inventory: dict[str, list[tuple[str, float]]] = {}
     if eia_api_key:
-        from .eia import fetch_ecuador_crude_production, fetch_us_retail_prices
+        from .eia import fetch_ecuador_crude_production, fetch_us_retail_prices, fetch_us_weekly_inventory
         try:
             us_retail = fetch_us_retail_prices(eia_api_key)
         except Exception:
@@ -742,6 +812,10 @@ def generate_market_bundle(
             ecuador_production = fetch_ecuador_crude_production(eia_api_key)
         except Exception:
             ecuador_production = []
+        try:
+            us_inventory = fetch_us_weekly_inventory(eia_api_key)
+        except Exception:
+            us_inventory = {}
     if warehouse_path is not None and raw_series:
         try:
             from .warehouse import save_market_history
@@ -799,6 +873,12 @@ def generate_market_bundle(
     if selected_only and gap_payload and all(key != "price-gap" for key, _ in specs):
         # Changes only when the regulated price moves; the signature prevents repeats.
         specs.append(("price-gap", gap_payload))
+    # The weekly US inventory is only published when the week-over-week move is
+    # material, so the feed never repeats a flat series every Wednesday.
+    if selected_only and inventory_is_notable(us_inventory) and all(key != "us-inventory" for key, _ in specs):
+        inventory_payload = build_us_inventory_payload(us_inventory)
+        if inventory_payload:
+            specs.append(("us-inventory", inventory_payload))
     destination_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[tuple[str, Path, str]] = []
     for key, payload in specs:

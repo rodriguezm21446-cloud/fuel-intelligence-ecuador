@@ -11,6 +11,13 @@ EIA_RETAIL_SERIES = {
     "Diésel": "EMD_EPD2D_PTE_NUS_DPG",
 }
 
+# Weekly Petroleum Status Report stocks, in thousand barrels (EIA Weekly Stocks).
+EIA_WEEKLY_STOCKS = {
+    "Crudo": "WCRSTUS1",
+    "Gasolina": "WGTSTUS1",
+    "Diésel": "WDIRSTUS1",
+}
+
 
 def fetch_us_retail_prices(api_key: str, timeout_seconds: int = 20, length: int = 180) -> dict[str, list[tuple[str, float]]]:
     """Fetch official weekly U.S. retail prices from EIA API v2.
@@ -44,6 +51,43 @@ def fetch_us_retail_prices(api_key: str, timeout_seconds: int = 20, length: int 
         except (TypeError, ValueError):
             continue
         if name and len(period) == 10 and 0.5 <= value <= 15:
+            output[name][period] = value
+    return {name: sorted(rows.items()) for name, rows in output.items() if rows}
+
+
+def fetch_us_weekly_inventory(api_key: str, timeout_seconds: int = 20, length: int = 120) -> dict[str, list[tuple[str, float]]]:
+    """Official weekly U.S. petroleum stocks (thousand barrels) from EIA API v2.
+
+    Uses the Weekly Petroleum Status Report route for crude, gasoline and
+    distillate. A missing key or a wrong series yields nothing rather than a
+    guess; values are kept only inside a broad plausibility band.
+    """
+    if not api_key.strip():
+        return {}
+    query: list[tuple[str, str]] = [
+        ("api_key", api_key.strip()),
+        ("frequency", "weekly"),
+        ("data[0]", "value"),
+        ("sort[0][column]", "period"),
+        ("sort[0][direction]", "desc"),
+        ("length", str(length)),
+    ]
+    for series in EIA_WEEKLY_STOCKS.values():
+        query.append(("facets[series][]", series))
+    url = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/?" + urllib.parse.urlencode(query)
+    request = urllib.request.Request(url, headers={"User-Agent": "FuelIntelligenceEcuador/0.4"})
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    reverse = {value: key for key, value in EIA_WEEKLY_STOCKS.items()}
+    output: dict[str, dict[str, float]] = {name: {} for name in EIA_WEEKLY_STOCKS}
+    for row in payload.get("response", {}).get("data", []):
+        name = reverse.get(str(row.get("series", "")))
+        period = str(row.get("period", ""))[:10]
+        try:
+            value = float(row.get("value"))
+        except (TypeError, ValueError):
+            continue
+        if name and len(period) == 10 and 20_000.0 <= value <= 2_000_000.0:
             output[name][period] = value
     return {name: sorted(rows.items()) for name, rows in output.items() if rows}
 

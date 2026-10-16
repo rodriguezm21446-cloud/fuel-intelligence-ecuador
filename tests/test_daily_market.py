@@ -16,7 +16,9 @@ from fuelintel.market_intelligence import (
     build_ecuador_production_payload,
     build_indexed_energy_payload,
     build_price_gap_payload,
+    build_us_inventory_payload,
     generate_market_bundle,
+    inventory_is_notable,
     select_event_chart_key,
 )
 from fuelintel.storage import Store
@@ -144,6 +146,42 @@ class DailyMarketTests(unittest.TestCase):
         self.assertEqual(payload["datasets"][1]["values"], [2.10, 2.60])
         self.assertIn("no incluye impuestos", payload["insight"])
         self.assertIsNone(build_price_gap_payload({}, raw))
+
+    def test_weekly_inventory_is_measured_and_only_published_when_notable(self):
+        flat = {"Crudo": [("2026-09-04", 800000.0), ("2026-09-11", 800000.0)]}
+        self.assertFalse(inventory_is_notable(flat))
+        moved = {"Crudo": [("2026-09-04", 800000.0), ("2026-09-11", 840000.0)]}
+        self.assertTrue(inventory_is_notable(moved))
+        payload = build_us_inventory_payload(moved)
+        self.assertEqual(payload["valueSuffix"], " mil bbl")
+        self.assertIn("sem.", payload["insight"])
+        self.assertIn("no el precio local", payload["insight"])
+
+    def test_daily_bundle_appends_weekly_inventory_only_when_notable(self):
+        raw = {
+            "WTI": [("2026-09-14", 80.0), ("2026-09-15", 81.0)],
+            "Brent": [("2026-09-14", 84.0), ("2026-09-15", 85.0)],
+        }
+        moved = {"Crudo": [("2026-09-04", 800000.0), ("2026-09-11", 840000.0)]}
+        flat = {"Crudo": [("2026-09-04", 800000.0), ("2026-09-11", 800500.0)]}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("fuelintel.market_intelligence.load_market_series", return_value=raw), \
+             patch("fuelintel.market_intelligence.choose_market_focus", return_value="crude"), \
+             patch("fuelintel.market_intelligence.render_chart", side_effect=lambda payload, path: path), \
+             patch("fuelintel.eia.fetch_us_retail_prices", return_value={}), \
+             patch("fuelintel.eia.fetch_ecuador_crude_production", return_value=[]), \
+             patch("fuelintel.eia.fetch_us_weekly_inventory", return_value=moved):
+            notable, _, _, _ = generate_market_bundle(Path(folder), selected_only=True, eia_api_key="k")
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("fuelintel.market_intelligence.load_market_series", return_value=raw), \
+             patch("fuelintel.market_intelligence.choose_market_focus", return_value="crude"), \
+             patch("fuelintel.market_intelligence.render_chart", side_effect=lambda payload, path: path), \
+             patch("fuelintel.eia.fetch_us_retail_prices", return_value={}), \
+             patch("fuelintel.eia.fetch_ecuador_crude_production", return_value=[]), \
+             patch("fuelintel.eia.fetch_us_weekly_inventory", return_value=flat):
+            quiet, _, _, _ = generate_market_bundle(Path(folder), selected_only=True, eia_api_key="k")
+        self.assertIn("us-inventory", [item[0] for item in notable])
+        self.assertNotIn("us-inventory", [item[0] for item in quiet])
 
     def test_news_can_choose_spread_and_relative_views(self):
         self.assertEqual(select_event_chart_key("Aumenta diferencial Brent-WTI"), "spread")
