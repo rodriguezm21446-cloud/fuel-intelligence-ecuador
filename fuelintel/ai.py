@@ -104,7 +104,10 @@ class GeminiEditor:
 
             allowed_numbers = numbers(evidence + "\n" + fallback_x)
             generated_numbers = numbers(analysis + "\n" + x_text + "\n" + doubts)
-            if any(count > allowed_numbers[token] for token, count in generated_numbers.items()):
+            # The same verified figure may legitimately appear in both the
+            # analysis and the X text; only brand-new figures are rejected.
+            invented_numbers = [token for token in generated_numbers if token not in allowed_numbers]
+            if invented_numbers:
                 self.last_error = "respuesta descartada: Gemini añadió cifras no presentes en la evidencia"
                 return None
             required_x_numbers = numbers(fallback_x)
