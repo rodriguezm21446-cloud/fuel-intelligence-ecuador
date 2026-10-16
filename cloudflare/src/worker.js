@@ -3,6 +3,8 @@ const TOPIC_WORDS = [
   "gasolina", "ecopais", "extra", "super", "diesel", "combustible",
   "petroleo", "crudo", "brent", "wti", "opep", "opec", "refineria",
   "subsidio", "hidrocarburo", "derivados", "petroecuador", "arch",
+  "escasez", "abastecimiento", "desabastecimiento", "gasolinera",
+  "expendedor", "octanaje", "petrolero", "oleoducto", "hidrocarburos",
   "gasoline", "diesel fuel", "crude oil", "refinery", "refining", "inventory",
   "inventories", "shortage", "outage", "volatility", "rbob", "ulsd", "oil",
   "pipeline", "tanker", "vessel", "shipping", "maritime", "hormuz", "bab al-mandab",
@@ -64,7 +66,11 @@ function publishedMilliseconds(publishedAt, detectedAt) {
 
 function nextPollSeconds(source, state) {
   const errors = Math.min(6, Math.max(0, Number(state?.error_count || 0)));
-  return Math.min(3600, (source.pollSeconds || 60) * (2 ** errors));
+  // Government sites back off up to an hour to stay polite, but a flaky news
+  // feed or aggregator must recover quickly instead of staying silent for
+  // hours after a single transient block.
+  const ceiling = source.critical ? 3600 : 600;
+  return Math.min(ceiling, (source.pollSeconds || 60) * (2 ** errors));
 }
 
 function isRelevantCandidate(source, raw) {
@@ -83,17 +89,25 @@ function isDomesticPriceSignal(source, raw) {
   ]);
   if (!domestic.has(source.id)) return false;
   const text = normalizeText(`${raw.title} ${raw.summary}`);
-  const hasFuel = ["gasolina", "ecopais", "extra", "super", "diesel", "combustible"]
-    .some((word) => text.includes(word));
-  const hasPriceEvent = ["precio", "sube", "baja", "aumento", "incremento", "reduccion", "vigencia"]
-    .some((word) => text.includes(word));
-  return hasFuel && hasPriceEvent;
+  // Ecuador-focused energy news, not only a confirmed price change: a supply
+  // scare, an import, a refinery outage or a decree all matter to the operator.
+  const hasEnergy = [
+    "gasolina", "ecopais", "extra", "super", "diesel", "combustible",
+    "hidrocarburo", "petroleo", "crudo", "gasolinera", "refineria", "subsidio",
+  ].some((word) => text.includes(word));
+  const hasEvent = [
+    "precio", "sube", "baja", "aumento", "incremento", "reduccion", "vigencia",
+    "escasez", "abastecimiento", "desabastecimiento", "importacion", "paralizacion",
+    "alza", "rebaja", "decreto", "resolucion", "subsidio",
+  ].some((word) => text.includes(word));
+  return hasEnergy && hasEvent;
 }
 
 function isMarketSquawkSignal(source, raw) {
   const fastSources = new Set([
-    "cnbc-energy-rss", "cnbc-finance-rss", "telegram-aja-news",
-    "telegram-walter-bloomberg", "ukmto-maritime-security", "x-bloomberg"
+    "cnbc-energy-rss", "cnbc-finance-rss", "oilprice-main-rss",
+    "telegram-aja-news", "telegram-walter-bloomberg", "ukmto-maritime-security",
+    "x-bloomberg"
   ]);
   if (!fastSources.has(source.id)) return false;
   const text = normalizeText(`${raw.title} ${raw.summary}`);
@@ -451,7 +465,15 @@ async function pollSource(env, source, state, detectedAt) {
     const bootstrap = !state?.body_hash;
     if (state?.body_hash !== bodyHash) {
       const candidates = discover(source, body, response.url || source.url);
-      if (source.kind !== "html" && candidates.length === 0) throw new Error("Parser no encontró artículos: revisar feed, bloqueo o cambio de página");
+      if (source.kind !== "html" && candidates.length === 0) {
+        // A response that is not a feed at all (HTML challenge page, consent
+        // wall, aggregator block) is a blocked read, not a code failure. It is
+        // reported in /health and never pages the operator. A valid but empty
+        // feed is normal and must not count as an error either.
+        if (!/<(?:rss|feed|channel|item|entry)\b/i.test(body.slice(0, 4000))) {
+          throw new Error("el servidor bloqueó la lectura del feed (la respuesta no es un feed; reintento programado)");
+        }
+      }
       // Navigation links often occupy the first half of a news page. Filter
       // before limiting, otherwise a relevant new article can be silently lost.
       const relevantCandidates = candidates.filter((candidate) => isRelevantCandidate(source, candidate));

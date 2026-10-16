@@ -202,7 +202,13 @@ def _atom_link(element: ET.Element) -> str:
 
 
 def parse_rss(source: SourceSpec, payload: bytes, detected_at: datetime) -> list[Candidate]:
-    root = ET.fromstring(payload)
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError:
+        # Aggregators (for example Google News) sometimes answer a datacenter
+        # with an HTML challenge or consent page instead of a feed. One broken
+        # feed must never abort the whole run or look like a code failure.
+        return []
     entries = [node for node in root.iter() if node.tag.rsplit("}", 1)[-1].lower() in {"item", "entry"}]
     candidates: list[Candidate] = []
     for entry in entries[:50]:

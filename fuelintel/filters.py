@@ -22,6 +22,15 @@ HIGH_VALUE_TERMS = {
     "refineria": 4,
     "subsidio": 5,
     "hidrocarburo": 5,
+    "escasez": 5,
+    "abastecimiento": 5,
+    "desabastecimiento": 6,
+    "gasolinera": 4,
+    "expendedor": 3,
+    "octanaje": 3,
+    "petrolero": 4,
+    "oleoducto": 5,
+    "importacion de combustible": 6,
     "precio": 2,
     "importacion": 2,
     "derivados": 3,
@@ -83,6 +92,16 @@ EXCLUSION_TERMS = {
 
 AMBIGUOUS_TERMS = {"extra", "super", "arch", "oil"}
 
+# Ecuador-focused energy words. A local fuel or energy story matters to the
+# operator even before an official price is published, so the Ecuadorian
+# sources receive a small, explicit boost for them.
+ECUADOR_ENERGY_TERMS = {
+    "gasolina", "ecopais", "extra", "super", "diesel", "combustible",
+    "hidrocarburo", "petroleo", "crudo", "gasolinera", "refineria",
+    "subsidio", "petroecuador", "arch", "escasez", "abastecimiento",
+    "oleoducto", "petrolero",
+}
+
 
 def _contains(text: str, term: str) -> bool:
     if term not in AMBIGUOUS_TERMS:
@@ -93,14 +112,18 @@ def _contains(text: str, term: str) -> bool:
 def relevance_score(candidate: Candidate) -> int:
     title = fold(candidate.title)
     body = fold(f"{candidate.summary} {candidate.body}")
+    full = f"{title} {body}"
     score = 0
     for term, weight in HIGH_VALUE_TERMS.items():
         if _contains(title, term):
             score += weight * 2
         elif _contains(body, term):
             score += weight
-    if candidate.source.country == "EC" and "ecuador" in body:
-        score += 3
+    if candidate.source.country == "EC":
+        if "ecuador" in full:
+            score += 3
+        if any(_contains(full, term) for term in ECUADOR_ENERGY_TERMS):
+            score += 3
     score -= sum(10 for term in EXCLUSION_TERMS if term in title)
     return score
 

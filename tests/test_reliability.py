@@ -5,8 +5,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from fuelintel.filters import relevance_score
 from fuelintel.models import Candidate, SourceSpec, VerificationStatus
 from fuelintel.pipeline import Pipeline
+from fuelintel.sources import parse_rss
 from fuelintel.storage import Store
 from tests.test_core import _CaptureNotifier, _NoEnrichment
 
@@ -93,6 +95,33 @@ class ReliabilityTests(unittest.TestCase):
         retry = self.pipeline().process(candidate)
         self.assertTrue(retry.notified)
         self.assertEqual(len(self.notifier.messages), 2)
+
+
+class EcuadorEnergyRelevanceTests(unittest.TestCase):
+    now = datetime(2026, 9, 13, 18, tzinfo=timezone.utc)
+
+    def test_ecuador_energy_news_is_relevant_without_a_price_word(self):
+        source = SourceSpec("primicias-economia", "Primicias", "https://example.test", "html_links", 75)
+        candidate = Candidate(
+            source=source,
+            title="Ecuador declara emergencia por escasez de diésel",
+            url="https://example.test/a",
+        )
+        self.assertGreaterEqual(relevance_score(candidate), 5)
+
+    def test_incidental_archive_words_stay_irrelevant(self):
+        source = SourceSpec("arch", "ARCH", "https://example.test", "html", 100)
+        candidate = Candidate(
+            source=source,
+            title="Archivo extraordinario de supermercados",
+            url="https://example.test/b",
+        )
+        self.assertEqual(relevance_score(candidate), 0)
+
+    def test_non_feed_payload_returns_no_candidates(self):
+        source = SourceSpec("google-news-ecuador-combustibles", "G", "https://example.test", "rss", 72)
+        html = b"<!doctype html><html><body>Consent wall, not a feed</body></html>"
+        self.assertEqual(parse_rss(source, html, self.now), [])
 
 
 if __name__ == "__main__":
