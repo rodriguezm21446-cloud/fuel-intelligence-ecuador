@@ -356,6 +356,34 @@ def build_ecuador_production_payload(rows: list[tuple[str, float]]) -> dict | No
     }
 
 
+def build_ecuador_crude_exports_payload(rows: list[tuple[str, float]]) -> dict | None:
+    """Official monthly Ecuador crude oil export value (USD FOB); never invented."""
+    series = [(period, value) for period, value in rows if value and value > 0][-24:]
+    if len(series) < 2:
+        return None
+    labels = [_month_label(period) for period, _ in series]
+    values = [round(value) for _, value in series]
+    return {
+        "title": "Exportaciones de crudo de Ecuador",
+        "subtitle": "Valor mensual oficial · millones de USD FOB (Banco Central del Ecuador)",
+        "labels": labels,
+        "datasets": [{"label": "Crudo", "color": "#8D887F", "values": values, "pending": False}],
+        "annotations": [],
+        "references": [{"label": "Crudo", "color": "#8D887F", "min": min(values), "max": max(values)}],
+        "chartKind": "bar",
+        "stepped": False,
+        "insight": f"Último mes publicado: {labels[-1]} con {values[-1]:.0f} millones de USD FOB.",
+        "source": (
+            "Fuente: Banco Central del Ecuador (BCE) · "
+            f"Periodo: {labels[0]}–{labels[-1]}"
+        ),
+        "credit": own_data_label(),
+        "displayDecimals": 0,
+        "valuePrefix": "$",
+        "valueSuffix": " M",
+    }
+
+
 def build_market_heatmap_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict | None:
     rows = []
     for name in ("WTI", "Brent", "RBOB", "ULSD"):
@@ -604,6 +632,7 @@ def generate_event_market_chart(text: str, destination: Path) -> Path | None:
 def generate_market_bundle(
     destination_dir: Path, related_news: list[dict] | None = None, warehouse_path: Path | None = None,
     eia_api_key: str = "", selected_only: bool = False, variety: bool = False,
+    bce_exports: list[tuple[str, float]] | None = None,
 ) -> tuple[list[tuple[str, Path, str]], TelegramSections | None, str, str]:
     raw_series = load_market_series()
     us_retail: dict[str, list[tuple[str, float]]] = {}
@@ -663,6 +692,10 @@ def generate_market_bundle(
     if selected_only and production_payload and all(key != "ecuador-production" for key, _ in specs):
         # Monthly official publication; the signature prevents repeats.
         specs.append(("ecuador-production", production_payload))
+    exports_payload = build_ecuador_crude_exports_payload(bce_exports or [])
+    if selected_only and exports_payload and all(key != "ecuador-exports" for key, _ in specs):
+        # Monthly official publication; the signature prevents repeats.
+        specs.append(("ecuador-exports", exports_payload))
     destination_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[tuple[str, Path, str]] = []
     for key, payload in specs:

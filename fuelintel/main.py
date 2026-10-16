@@ -121,6 +121,12 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             LOG.exception("WF_08_ERROR_MONITOR registró el fallo del gráfico nacional")
     try:
         related_news = store.recent_notified_market_news(now=datetime.now(timezone.utc), hours=36, limit=2)
+        try:
+            from .bce import fetch_ecuador_crude_exports
+            bce_exports = fetch_ecuador_crude_exports()
+        except Exception:
+            LOG.exception("no se pudieron leer las exportaciones de crudo del BCE")
+            bce_exports = []
         market_artifacts, market_sections, market_focus, latest_close = generate_market_bundle(
             settings.data_dir / "charts" / "market-close",
             related_news=related_news,
@@ -128,6 +134,7 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             eia_api_key=settings.eia_api_key,
             selected_only=True,
             variety=True,
+            bce_exports=bce_exports,
         )
     except Exception as error:
         store.record_chart_error("WF_06_CHART_GENERATOR", f"mercado: {type(error).__name__}: {error}")
@@ -146,6 +153,7 @@ def dashboard(settings: Settings, now_local: datetime | None = None) -> int:
             "weekly-moves": "Variación semanal de energía", "us-retail": "Precios minoristas oficiales de EE. UU.",
             "spread": "Diferencial Brent–WTI", "indexed": "Evolución relativa de energía",
             "ecuador-production": "Producción de petróleo crudo de Ecuador",
+            "ecuador-exports": "Exportaciones de crudo de Ecuador",
         }
         observed_label = f"Último dato observado: {latest_close}" if latest_close else "Sin fecha de observación comprobable"
         for key, market_path, market_signature in market_artifacts:

@@ -11,6 +11,7 @@ from fuelintel.formatting import TelegramSections
 from fuelintel.main import dashboard
 from fuelintel.market_intelligence import (
     build_brent_wti_spread_payload,
+    build_ecuador_crude_exports_payload,
     build_ecuador_production_payload,
     build_indexed_energy_payload,
     generate_market_bundle,
@@ -110,6 +111,29 @@ class DailyMarketTests(unittest.TestCase):
         self.assertEqual(focus, "spread")
         self.assertEqual(last_day, "2026-09-15")
         self.assertEqual(render.call_count, 1)
+
+    def test_crude_exports_payload_needs_two_months_and_states_units(self):
+        payload = build_ecuador_crude_exports_payload([("2026-04", 600.0), ("2026-05", 640.0)])
+        self.assertEqual(payload["labels"], ["04/2026", "05/2026"])
+        self.assertEqual(payload["datasets"][0]["values"], [600, 640])
+        self.assertEqual(payload["valuePrefix"], "$")
+        self.assertEqual(payload["valueSuffix"], " M")
+        self.assertIsNone(build_ecuador_crude_exports_payload([("2026-05", 640.0)]))
+
+    def test_daily_bundle_appends_official_crude_exports(self):
+        raw = {
+            "WTI": [("2026-09-14", 80.0), ("2026-09-15", 81.0)],
+            "Brent": [("2026-09-14", 84.0), ("2026-09-15", 85.0)],
+        }
+        exports = [("2026-04", 600.0), ("2026-05", 640.0)]
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("fuelintel.market_intelligence.load_market_series", return_value=raw), \
+             patch("fuelintel.market_intelligence.choose_market_focus", return_value="spread"), \
+             patch("fuelintel.market_intelligence.render_chart", side_effect=lambda payload, path: path):
+            artifacts, _, _, _ = generate_market_bundle(
+                Path(folder), selected_only=True, bce_exports=exports
+            )
+        self.assertIn("ecuador-exports", [item[0] for item in artifacts])
 
 
 if __name__ == "__main__":
