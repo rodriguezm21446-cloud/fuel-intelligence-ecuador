@@ -21,6 +21,12 @@ def collapse_spaces(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
 
 
+def tidy_lines(value: str) -> str:
+    """Collapse runs of spaces inside each line while keeping paragraph breaks."""
+    lines = (re.sub(r"[ \t]+", " ", line).strip() for line in (value or "").replace("\r", "").split("\n"))
+    return "\n".join(line for line in lines if line)
+
+
 def fold(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", collapse_spaces(value).lower())
     return "".join(char for char in normalized if not unicodedata.combining(char))

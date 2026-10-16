@@ -7,7 +7,7 @@ import urllib.request
 from collections import Counter
 from dataclasses import dataclass
 
-from .text import collapse_spaces, trim_x
+from .text import collapse_spaces, tidy_lines, trim_x
 
 
 EDITORIAL_GUARDRAILS = (
@@ -16,6 +16,18 @@ EDITORIAL_GUARDRAILS = (
     "cuando la evidencia incluya el documento oficial aplicable. No atribuyas un movimiento a un ataque, "
     "oleoducto, sanción, inventario o decisión de la OPEP si esa causa no aparece explícitamente en la evidencia. "
     "Separa hechos, cálculos propios y contexto."
+)
+
+# A calm, neutral analyst contract: the model reasons over verified data and states
+# its own uncertainty instead of narrating the news or guessing the future.
+ANALYST_CONTRACT = (
+    "Actúa como analista de riesgo de un fondo: frío, neutral, cuantitativo y sin exagerar. Escribe con "
+    "tranquilidad, sin lenguaje de alarma. Recuerda que Ecuador no fija el precio mundial del petróleo: es "
+    "tomador de precio, y su precio interno depende de un decreto del Gobierno. Estructura el 'analysis' en "
+    "cuatro bloques con estos encabezados exactos: 'Hecho:', 'Drivers medidos:', 'Canal hacia Ecuador:' e "
+    "'Incertidumbre:'. En 'Drivers medidos' separa lo medido de lo inferido y escribe 'no verificado' cuando "
+    "el vínculo no esté en la evidencia. En 'Incertidumbre' declara de forma explícita lo que no puede saberse "
+    "con la evidencia, en particular cuándo y cuánto cambiará el precio oficial en Ecuador."
 )
 
 
@@ -48,14 +60,11 @@ class GeminiEditor:
         prompt = (
             "Eres editor de inteligencia de combustibles de Ecuador. Usa únicamente la evidencia. "
             "No inventes cifras, fechas, causas, predicciones ni fuentes. Declara contradicciones o "
-            "documentos oficiales pendientes. Explica primero qué pasó, luego la causa respaldada y finalmente "
-            "el posible canal hacia Ecuador; si falta una causa comprobada, dilo literalmente. Escribe sin emojis. "
-            "Si se entregan DATOS INTERNOS VERIFICADOS, intégralos de forma fría y ordenada para explicar el "
-            "contexto ecuatoriano (hecho, causa respaldada si existe, canal hacia Ecuador). No escribas ninguna "
+            "documentos oficiales pendientes. Escribe sin emojis. Si se entregan DATOS INTERNOS VERIFICADOS, "
+            "intégralos de forma fría y ordenada para explicar el contexto ecuatoriano. No escribas ninguna "
             "cifra (años, horas, porcentajes, conteos ni numeración de listas) que no aparezca literalmente en la "
-            "evidencia. "
-            "El análisis tendrá máximo 700 "
-            f"caracteres y el texto para X máximo 280. {EDITORIAL_GUARDRAILS}\n\n"
+            "evidencia. El análisis tendrá máximo 1100 caracteres y el texto para X máximo 280. "
+            f"{ANALYST_CONTRACT} {EDITORIAL_GUARDRAILS}\n\n"
             f"EVIDENCIA VERIFICADA:\n{evidence[:12000]}\n\n"
             f"BORRADOR SEGURO PARA X:\n{fallback_x}\n\n"
             "Conserva exactamente las cifras comprobadas."
@@ -73,7 +82,7 @@ class GeminiEditor:
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 700,
+                "maxOutputTokens": 1000,
                 "responseMimeType": "application/json",
                 "responseSchema": schema,
             },
@@ -93,7 +102,7 @@ class GeminiEditor:
                 raw = json.loads(response.read().decode("utf-8"))
             content = raw["candidates"][0]["content"]["parts"][0]["text"]
             parsed = json.loads(content)
-            analysis = collapse_spaces(str(parsed.get("analysis", "")))[:700].strip()
+            analysis = tidy_lines(str(parsed.get("analysis", "")))[:1100].strip()
             x_text = trim_x(collapse_spaces(str(parsed.get("x_text", ""))), 280)
             doubts = collapse_spaces(str(parsed.get("doubts", "")))[:300].strip()
             if not analysis or not x_text:

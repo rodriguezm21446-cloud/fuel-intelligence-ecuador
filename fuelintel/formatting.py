@@ -331,7 +331,7 @@ def format_unconfirmed_news_squawk(
     editorial: Editorial | None = None,
 ) -> str:
     """Fast, clearly labelled single-source alert for a potentially material event."""
-    excerpt = (editorial.analysis if editorial else collapse_spaces(candidate.summary or candidate.body))[:700].rstrip()
+    excerpt = (editorial.analysis if editorial else collapse_spaces(candidate.summary or candidate.body))[:1100].rstrip()
     headline = editorial.x_text if editorial else candidate.title
     lines = [
         "SQUAWK TEMPRANO — UNA SOLA FUENTE",
