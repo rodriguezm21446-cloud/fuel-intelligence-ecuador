@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from .anomalies import detect_anomalies
 from .chart_renderer import render_chart, render_heatmap
 from .charts import own_data_label
+from .finance import percentile_rank, realized_volatility, return_correlation, volatility_series
 from .formatting import TelegramSections
 from .knowledge import within_band
 from .market_math import percentage_change, validate_market_series
@@ -617,6 +618,30 @@ def _observed_sentence(name: str, rows: list[tuple[str, float]]) -> str:
     return f"{name}: ${price:.{decimals}f} {unit}; {move}."
 
 
+def build_quantitative_reading(raw_series: dict[str, list[tuple[str, float]]]) -> list[str]:
+    """Measured finance the bot applies to the series. Never a direction, never a forecast."""
+    reading: list[str] = []
+    crude = raw_series.get("WTI") or raw_series.get("Brent")
+    if not crude:
+        return reading
+    name = "WTI" if raw_series.get("WTI") else "Brent"
+    volatility = realized_volatility(crude, 20)
+    if volatility is not None:
+        rank = percentile_rank(volatility_series(crude, 20), volatility)
+        tail = f", percentil {rank} del histórico observado" if rank is not None else ""
+        reading.append(f"Volatilidad realizada 20 sesiones de {name}: {volatility:.1f}% anualizada{tail}.")
+    position = percentile_rank(crude)
+    if position is not None:
+        reading.append(f"El último cierre de {name} está en el percentil {position} de su histórico observado.")
+    for product in ("RBOB", "ULSD"):
+        leg = raw_series.get(product)
+        if leg:
+            correlation = return_correlation(leg, crude, 60)
+            if correlation is not None:
+                reading.append(f"Correlación de retornos 60 sesiones {product}–{name}: {correlation:+.2f}.")
+    return reading
+
+
 def build_market_sections(
     raw_series: dict[str, list[tuple[str, float]]], related_news: list[dict] | None = None,
     us_retail: dict[str, list[tuple[str, float]]] | None = None,
@@ -678,6 +703,9 @@ def build_market_sections(
     anomalies = detect_anomalies(raw_series)
     if anomalies:
         lines.extend(["", "Alerta estadística:", *[signal.explanation for signal in anomalies[:2]]])
+    reading = build_quantitative_reading(raw_series)
+    if reading:
+        lines.extend(["", "Lectura cuantitativa (descriptiva, sin pronóstico):", *reading])
     lines.extend([
         "", "Lectura para Ecuador:",
         "RBOB y ULSD son alertas externas de costos. El precio local solo cambia cuando una fuente ecuatoriana verificable publica la decisión y su vigencia.",

@@ -39,6 +39,84 @@ FACTS: dict[str, MetricFact] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class Concept:
+    """A financial idea the bot must understand before it can use it."""
+
+    key: str
+    definition: str
+    formula: str
+    applied_as: str
+
+
+CONCEPTS: dict[str, Concept] = {
+    "retorno": Concept(
+        "retorno",
+        "cambio relativo del precio entre dos observaciones",
+        "r = Pₜ / Pₜ₋₁ − 1",
+        "variación diaria y semanal de cada serie",
+    ),
+    "volatilidad": Concept(
+        "volatilidad",
+        "dispersión de los retornos; mide incertidumbre, no dirección",
+        "σ anual = desv(retornos) × √252",
+        "lectura cuantitativa de WTI y Brent, con su percentil histórico",
+    ),
+    "correlacion": Concept(
+        "correlación",
+        "grado en que dos series se mueven juntas; no implica causalidad",
+        "ρ = cov(a,b) / (σa · σb) sobre retornos alineados",
+        "co-movimiento de RBOB y ULSD con WTI",
+    ),
+    "beta": Concept(
+        "beta",
+        "sensibilidad de los retornos de un activo frente a su referencia",
+        "β = cov(a,b) / var(b)",
+        "cuánto responde una serie a los movimientos del crudo",
+    ),
+    "percentil": Concept(
+        "percentil",
+        "posición de un valor dentro de la historia observada, 0–100",
+        "rango = (valores ≤ x) / total × 100",
+        "dónde está el último cierre dentro de su propio histórico",
+    ),
+    "drawdown": Concept(
+        "drawdown",
+        "mayor caída desde un máximo previo hasta un mínimo posterior",
+        "máx( Pₜ / máx(P₀..Pₜ) − 1 )",
+        "profundidad de la mayor caída del periodo observado",
+    ),
+    "zscore": Concept(
+        "z-score robusto",
+        "cuántas desviaciones típicas robustas se aleja el dato de su centro",
+        "z = 0.6745 × (x − mediana) / MAD",
+        "alertas de movimiento o régimen atípico",
+    ),
+    "crack_spread": Concept(
+        "crack spread",
+        "margen teórico de refino: producto destilado menos crudo",
+        "RBOB × 42 − WTI; ULSD × 42 − WTI",
+        "proxy del costo de importar refinados, referencia para Ecuador",
+    ),
+    "brecha": Concept(
+        "brecha de referencia",
+        "diferencia medida entre el precio regulado y la cotización internacional",
+        "brecha = precio_oficial − referencia (misma unidad)",
+        "comparación honesta USD/gal; no incluye impuestos ni subsidios",
+    ),
+    "contango": Concept(
+        "contango / backwardation",
+        "estructura temporal: futuros lejanos por encima (contango) o por debajo (backwardation) del cercano",
+        "pendiente = F_lejano − F_cercano",
+        "solo descriptible con varios vencimientos; el bot no lo inventa",
+    ),
+}
+
+
+def concept(key: str) -> Concept | None:
+    return CONCEPTS.get(key)
+
+
 def fact(key: str) -> MetricFact | None:
     return FACTS.get(key)
 
