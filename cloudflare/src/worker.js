@@ -39,9 +39,22 @@ function freshness(publishedAt, detectedAt, hours = 2) {
 }
 
 function isBlockedError(value = "") {
-  // Government sites often refuse or silently drop datacenter traffic. That is
-  // not a code failure, so it must not raise the operator's technical alarm.
+  // A blocked or dropped connection is not a code failure, so it must not
+  // raise the operator's technical alarm.
   return /bloqueó|no respondió|HTTP (401|403|429|451)/i.test(String(value || ""));
+}
+
+// Ecuadorian official sites routinely refuse, throttle or return challenge
+// pages to datacenter traffic. The Worker keeps them in /health, but they never
+// page the operator: the GitHub runner (different network) is the authority
+// that confirms real price or decree changes.
+const DATACENTER_BLOCKED = new Set([
+  "arch-precios", "arch-biblioteca", "presidencia-decretos",
+  "petroecuador-precios", "petroecuador-historico", "bce-petroleo",
+]);
+
+function isMutedSource(sourceId, lastError) {
+  return DATACENTER_BLOCKED.has(sourceId) || isBlockedError(lastError);
 }
 
 function publishedMilliseconds(publishedAt, detectedAt) {
@@ -459,13 +472,14 @@ async function pollSource(env, source, state, detectedAt) {
     ).bind(source.id, response.headers.get("etag"), response.headers.get("last-modified"), bodyHash, detectedAt).run();
   } catch (error) {
     const status = Number(String(error?.message || "").match(/HTTP (\d+)/)?.[1]);
+    const detail = String(error?.message || "").slice(0, 120);
     const refused = [401, 403, 429, 451].includes(status);
-    const timedOut = /timeout|abort/i.test(`${error?.name || ""} ${error?.message || ""}`);
+    const timedOut = /timeout|abort/i.test(`${error?.name || ""} ${detail}`);
     const message = refused
       ? `HTTP ${status}: el servidor bloqueó la lectura automática (reintento programado)`
       : timedOut
         ? "Sin respuesta: el servidor no respondió a la lectura automática desde el centro de datos (reintento programado)"
-        : `${error?.name || "Error"}: fallo de lectura o procesamiento; revisar la fuente`;
+        : `${error?.name || "Error"}: ${detail || "fallo de lectura o procesamiento"}`;
     await env.DB.prepare(
       `INSERT INTO source_state(source_id, body_hash, checked_at, error_count, last_error)
        VALUES (?, '', ?, 1, ?)
@@ -502,24 +516,22 @@ async function reportOperationalHealth(env, detectedAt) {
   // A blocked or timed-out source is reported in /health but never spams the
   // operator: the technical alarm only covers sources that truly break.
   const failedIds = (failed.results || [])
-    .filter(row => !isBlockedError(row.last_error))
+    .filter(row => !isMutedSource(row.source_id, row.last_error))
     .map(row => row.source_id)
     .sort();
   const criticalSet = new Set(SOURCES.filter(source => source.critical).map(source => source.id));
   const criticalIds = failedIds.filter(id => criticalSet.has(id));
-  const partialIds = failedIds.filter(id => !criticalSet.has(id));
   if (!env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY) criticalIds.push("github-sin-configurar");
   if (Number(backlog?.total || 0)) criticalIds.push(`envíos-agotados:${backlog.total}`);
-  const fingerprint = [
-    ...criticalIds.map(id => `critical:${id}`),
-    ...partialIds.map(id => `partial:${id}`),
-  ].join(",") || "healthy";
+  // Only genuinely critical (non-muted) sources page the operator. A flaky news
+  // feed stays visible in /health and must never look like a coverage failure.
+  const fingerprint = criticalIds.map(id => `critical:${id}`).join(",") || "healthy";
   const previous = await env.DB.prepare("SELECT * FROM source_state WHERE source_id = '__monitor_health'").first();
   if (fingerprint === "healthy" && (!previous || previous.body_hash === "healthy")) return;
   const repeatAfter = criticalIds.length ? 6 * 3600_000 : 24 * 3600_000;
   if (previous?.body_hash === fingerprint && Date.parse(detectedAt) - Date.parse(previous.checked_at) < repeatAfter) return;
-  const message = criticalIds.length || partialIds.length
-    ? `Aviso técnico de combustibleEc\n${criticalIds.length ? `Cobertura crítica: ${criticalIds.join(", ")}. ` : ""}${partialIds.length ? `Cobertura parcial: ${partialIds.join(", ")}. ` : ""}\nLas demás fuentes continúan activas.`
+  const message = criticalIds.length
+    ? `Aviso técnico de combustibleEc\nCobertura crítica: ${criticalIds.join(", ")}.\nLas demás fuentes continúan activas.`
     : "combustibleEc: las fuentes y los envíos vigilados se han recuperado.";
   try {
     const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -579,8 +591,11 @@ export default {
       return !state || state.error_count >= 3 || !Number.isFinite(Date.parse(state.checked_at))
         || Date.now() - Date.parse(state.checked_at) > Math.max(600, source.pollSeconds * 3) * 1000;
     });
-    const criticalUnavailable = unavailable.filter(source => source.critical);
-    const blockedSources = states.filter(row => isBlockedError(row.last_error)).map(row => row.source_id).sort();
+    // A source the remote server blocks is reported, but is neither critical
+    // nor an outage, so it must not downgrade the service or wake the watchdog.
+    const mutedSet = new Set(states.filter(row => isMutedSource(row.source_id, row.last_error)).map(row => row.source_id));
+    const criticalUnavailable = unavailable.filter(source => source.critical && !mutedSet.has(source.id));
+    const blockedSources = [...mutedSet].sort();
     const missingConfiguration = !env.GITHUB_TOKEN || !env.GITHUB_REPOSITORY;
     return Response.json({
       service: "fuelintel-ecuador",
