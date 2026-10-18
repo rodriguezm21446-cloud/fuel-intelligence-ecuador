@@ -102,11 +102,41 @@ ECUADOR_ENERGY_TERMS = {
     "oleoducto", "petrolero",
 }
 
+# Fast local lane ("squawk de aquí"): a fuel mention plus either an actor
+# (president/minister) or an explicit change word. The president often speaks
+# before the official PDF and the media echo it first, so an actor word alone is
+# enough. This mirrors isDomesticPriceSignal in the Cloudflare worker.
+ECUADOR_FUEL_TERMS = {
+    "gasolina", "ecopais", "extra", "super", "diesel", "combustible",
+    "hidrocarburo", "petroleo", "crudo", "gasolinera", "refineria",
+    "subsidio", "derivados",
+}
+
+ECUADOR_ACTOR_TERMS = {
+    "noboa", "presidente", "ministro", "ministerio de energia", "gobierno", "ejecutivo",
+}
+
+ECUADOR_CHANGE_TERMS = {
+    "precio", "sube", "baja", "bajara", "subira", "aumento", "incremento", "reduccion",
+    "alza", "rebaja", "decreto", "resolucion", "centavos", "nuevo precio", "desde el 12",
+    "rigen", "escasez", "abastecimiento", "desabastecimiento",
+}
+
 
 def _contains(text: str, term: str) -> bool:
     if term not in AMBIGUOUS_TERMS:
         return term in text
     return re.search(rf"(?<![\w]){re.escape(term)}(?![\w])", text, flags=re.UNICODE) is not None
+
+
+def is_fast_fuel_signal(candidate: Candidate) -> bool:
+    """True when a story matches the local fast lane: fuel AND (actor OR change)."""
+    text = fold(f"{candidate.title} {candidate.summary} {candidate.body}")
+    if not any(_contains(text, term) for term in ECUADOR_FUEL_TERMS):
+        return False
+    return any(term in text for term in ECUADOR_ACTOR_TERMS) or any(
+        term in text for term in ECUADOR_CHANGE_TERMS
+    )
 
 
 def relevance_score(candidate: Candidate) -> int:
@@ -124,6 +154,8 @@ def relevance_score(candidate: Candidate) -> int:
             score += 3
         if any(_contains(full, term) for term in ECUADOR_ENERGY_TERMS):
             score += 3
+        if is_fast_fuel_signal(candidate):
+            score += 4
     score -= sum(10 for term in EXCLUSION_TERMS if term in title)
     return score
 

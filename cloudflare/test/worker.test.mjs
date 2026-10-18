@@ -7,7 +7,7 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
 const context = vm.createContext({ URL, Intl, AbortSignal, TextEncoder });
 vm.runInContext(source.replace("export default {", "const worker = {") +
-  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX};", context);
+  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,SOURCES};", context);
 const api = context.api;
 
 test("el detector distingue publicación reciente, antigua, futura y sin fecha", () => {
@@ -33,7 +33,10 @@ test("navegación extensa no oculta la noticia después del enlace 100", () => {
 test("fuente caída reduce frecuencia y vuelve al intervalo normal al recuperarse", () => {
   assert.equal(api.nextPollSeconds({pollSeconds: 60}, {error_count: 3}), 480);
   assert.equal(api.nextPollSeconds({pollSeconds: 60}, {error_count: 0}), 60);
-  assert.equal(api.nextPollSeconds({pollSeconds: 300}, {error_count: 99}), 3600);
+  // A flaky non-critical feed recovers quickly: ceiling of 10 minutes.
+  assert.equal(api.nextPollSeconds({pollSeconds: 300}, {error_count: 99}), 600);
+  // A critical source may back off up to an hour.
+  assert.equal(api.nextPollSeconds({pollSeconds: 60, critical: true}, {error_count: 99}), 3600);
 });
 
 test("palabras incidentales no disparan petróleo", () => {
@@ -63,6 +66,27 @@ test("alarma inmediata es texto limpio de máximo 300 caracteres", async () => {
   assert.ok(body.text.length <= 300);
   assert.equal(body.parse_mode, undefined);
   assert.match(body.text, /Impacto en Ecuador aún no confirmado/);
+});
+
+test("squawk local: combustible + actor o cambio despierta al operador", () => {
+  const source = { id: "google-news-ecuador-presidente" };
+  // El presidente habla de combustible: basta el actor, sin palabra de cambio.
+  assert.equal(api.isDomesticPriceSignal(source, { title: "Noboa habla sobre el diésel", summary: "" }), true);
+  // Combustible + cambio, sin actor.
+  assert.equal(api.isDomesticPriceSignal(source, { title: "La gasolina baja en Ecuador", summary: "" }), true);
+  // Solo actor, sin combustible: no dispara.
+  assert.equal(api.isDomesticPriceSignal(source, { title: "Noboa inaugura una escuela", summary: "" }), false);
+  // Solo cambio, sin combustible: no dispara.
+  assert.equal(api.isDomesticPriceSignal(source, { title: "El precio del banano sube", summary: "" }), false);
+  // Fuente no doméstica: nunca dispara como local.
+  assert.equal(api.isDomesticPriceSignal({ id: "cnbc-energy-rss" }, { title: "Noboa y la gasolina", summary: "" }), false);
+});
+
+test("las fuentes del squawk local están registradas como críticas", () => {
+  const ids = new Set(api.SOURCES.map((source) => source.id));
+  for (const id of ["google-news-ecuador-presidente", "google-news-ecuador-precios", "google-news-ecuador-combustibles"]) {
+    assert.ok(ids.has(id), `falta la fuente ${id}`);
+  }
 });
 
 test("X filtra política ajena al combustible y noticias financieras ajenas al petróleo", () => {

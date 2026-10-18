@@ -385,5 +385,29 @@
     "poll_seconds": 300,
     "idle_poll_seconds": 900,
     "max_age_hours": 72
+  },
+  {
+    "id": "google-news-ecuador-presidente",
+    "name": "Google News — presidente y combustibles (agregador)",
+    "url": "https://news.google.com/rss/search?q=%28Noboa%20OR%20presidente%20OR%20%22ministerio%20de%20energ%C3%ADa%22%20OR%20Petroecuador%29%20%28gasolina%20OR%20di%C3%A9sel%20OR%20combustible%20OR%20subsidio%29&hl=es-419&gl=EC&ceid=EC:es-419",
+    "kind": "rss",
+    "trust": 72,
+    "country": "EC",
+    "critical": true,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 90,
+    "max_age_hours": 24
+  },
+  {
+    "id": "google-news-ecuador-precios",
+    "name": "Google News — cambio de precio de combustibles Ecuador (agregador)",
+    "url": "https://news.google.com/rss/search?q=%28precio%20OR%20precios%20OR%20sube%20OR%20baja%20OR%20alza%20OR%20rebaja%20OR%20%22nuevo%20precio%22%29%20%28gasolina%20OR%20di%C3%A9sel%20OR%20combustible%20OR%20extra%20OR%20ecopa%C3%ADs%29%20Ecuador&hl=es-419&gl=EC&ceid=EC:es-419",
+    "kind": "rss",
+    "trust": 72,
+    "country": "EC",
+    "critical": true,
+    "poll_seconds": 60,
+    "idle_poll_seconds": 90,
+    "max_age_hours": 24
   }
 ]

@@ -84,23 +84,29 @@ function isDomesticPriceSignal(source, raw) {
   const domestic = new Set([
     "eluniverso-economia-rss", "primicias-economia", "ecuavisa-economia", "elcomercio-rss",
     "expreso-economia", "lahora-economia", "teleamazonas-economia", "eltelegrafo-economia",
-    "google-news-ecuador-combustibles"
+    "google-news-ecuador-combustibles", "google-news-ecuador-presidente", "google-news-ecuador-precios"
     ,"x-daniel-noboa", "x-petroecuador"
   ]);
   if (!domestic.has(source.id)) return false;
-  const text = normalizeText(`${raw.title} ${raw.summary}`);
+  const text = normalizeText(`${raw.title} ${raw.summary} ${raw.body || ""}`);
   // Ecuador-focused energy news, not only a confirmed price change: a supply
   // scare, an import, a refinery outage or a decree all matter to the operator.
   const hasEnergy = [
     "gasolina", "ecopais", "extra", "super", "diesel", "combustible",
     "hidrocarburo", "petroleo", "crudo", "gasolinera", "refineria", "subsidio",
   ].some((word) => text.includes(word));
-  const hasEvent = [
-    "precio", "sube", "baja", "aumento", "incremento", "reduccion", "vigencia",
-    "escasez", "abastecimiento", "desabastecimiento", "importacion", "paralizacion",
-    "alza", "rebaja", "decreto", "resolucion", "subsidio",
+  const hasChange = [
+    "precio", "precios", "sube", "baja", "bajara", "subira", "aumento", "incremento",
+    "reduccion", "vigencia", "escasez", "abastecimiento", "desabastecimiento",
+    "importacion", "paralizacion", "alza", "rebaja", "decreto", "resolucion", "subsidio",
+    "centavos", "nuevo precio", "desde el 12", "rigen",
   ].some((word) => text.includes(word));
-  return hasEnergy && hasEvent;
+  // The president or a minister may announce a change before the official PDF:
+  // media echoes it first, so an actor word alone is enough to wake the operator.
+  const hasActor = [
+    "noboa", "presidente", "ministro", "ministerio de energia", "gobierno", "ejecutivo",
+  ].some((word) => text.includes(word));
+  return hasEnergy && (hasChange || hasActor);
 }
 
 function isMarketSquawkSignal(source, raw) {
@@ -283,6 +289,8 @@ const SOURCES = [
   ,{ id: "teleamazonas-economia", name: "Teleamazonas — Economía", url: "https://imagenes.teleamazonas.com/actualidad/noticias/economia/", kind: "links", trust: 72, pollSeconds: 60 }
   ,{ id: "eltelegrafo-economia", name: "Google News — El Telégrafo combustibles", url: "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20petroleo%29%20site%3Aeltelegrafo.com.ec&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60 }
   ,{ id: "ukmto-maritime-security", name: "UKMTO — avisos oficiales de seguridad marítima", url: "https://www.ukmto.org/ukmto-products", kind: "links", trust: 95, pollSeconds: 300 }
+  ,{ id: "google-news-ecuador-presidente", name: "Google News — presidente y combustibles (agregador)", url: "https://news.google.com/rss/search?q=%28Noboa%20OR%20presidente%20OR%20%22ministerio%20de%20energ%C3%ADa%22%20OR%20Petroecuador%29%20%28gasolina%20OR%20di%C3%A9sel%20OR%20combustible%20OR%20subsidio%29&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60, critical: true }
+  ,{ id: "google-news-ecuador-precios", name: "Google News — cambio de precio de combustibles Ecuador (agregador)", url: "https://news.google.com/rss/search?q=%28precio%20OR%20precios%20OR%20sube%20OR%20baja%20OR%20alza%20OR%20rebaja%20OR%20%22nuevo%20precio%22%29%20%28gasolina%20OR%20di%C3%A9sel%20OR%20combustible%20OR%20extra%20OR%20ecopa%C3%ADs%29%20Ecuador&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60, critical: true }
 ];
 
 const USER_AGENT = "FuelIntelligenceEcuador/0.2 (+verified private monitor)";

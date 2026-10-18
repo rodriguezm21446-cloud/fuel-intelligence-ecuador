@@ -265,6 +265,14 @@ class Pipeline:
             early_warning_sent = False
             if prices and decision.status == VerificationStatus.PENDING:
                 prices = [replace(item, verification_status="PENDING") for item in prices]
+                # Detect the change against the last confirmed price before saving
+                # the provisional report, so the operator sees the movement early.
+                media_changes = {}
+                for item in prices:
+                    period_start = item.period.start.isoformat() if item.period else None
+                    previous_raw = self.store.previous_price(item.product, period_start)
+                    previous = Decimal(previous_raw) if previous_raw is not None else None
+                    media_changes[item.product] = price_change(item.price, previous)
                 for item in prices:
                     self.store.save_price(item)
                     if item.source_conflict:
@@ -276,7 +284,9 @@ class Pipeline:
                 ):
                     early_warning_sent = self._send_sections(
                         item_id,
-                        build_unconfirmed_price_sections(candidate, prices, local_now, decision.reasons, sent_local),
+                        build_unconfirmed_price_sections(
+                            candidate, prices, local_now, decision.reasons, sent_local, media_changes
+                        ),
                     )
                     if early_warning_sent:
                         self.store.mark_notified(item_id)

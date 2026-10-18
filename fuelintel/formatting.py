@@ -162,18 +162,43 @@ def build_news_sections(
     return TelegramSections(squawk=squawk, context=context)
 
 
+def _has_real_change(changes: dict[str, PriceChange] | None) -> bool:
+    return bool(changes) and any(
+        change is not None and change.previous is not None and change.absolute not in (None, 0)
+        for change in changes.values()
+    )
+
+
+def _change_lines(prices: list[FuelPrice], changes: dict[str, PriceChange] | None) -> list[str]:
+    if not _has_real_change(changes):
+        return []
+    return [
+        _price_movement(item.product, item.price, (changes or {}).get(item.product))
+        for item in prices
+    ]
+
+
 def build_unconfirmed_price_sections(
     candidate: Candidate,
     prices: list[FuelPrice],
     detected_local: datetime,
     reasons: tuple[str, ...],
     sent_local: datetime | None = None,
+    changes: dict[str, PriceChange] | None = None,
 ) -> TelegramSections:
     period = next((item.period for item in prices if item.period), None)
     period_text = f"{period.start:%d/%m}–{period.end:%d/%m}" if period else "vigencia pendiente"
-    values = " | ".join(f"{item.product}: ${_price(item.price)}" for item in prices)
+    changed = _has_real_change(changes)
+    if changed:
+        values = " | ".join(
+            _price_movement(item.product, item.price, (changes or {}).get(item.product), compact=True)
+            for item in prices
+        )
+    else:
+        values = " | ".join(f"{item.product}: ${_price(item.price)}" for item in prices)
+    marker = " · CAMBIO DETECTADO" if changed else ""
     squawk = trim_x(
-        f"Ecuador | Reporte de combustibles {period_text}: {values}. "
+        f"Ecuador | Reporte de combustibles {period_text}{marker}: {values}. "
         f"Aún no es precio oficial. Fuente: {candidate.source.name}.",
         300,
     )
@@ -184,6 +209,11 @@ def build_unconfirmed_price_sections(
             f"Detectado: {format_ecuador_time(detected_local)}",
             *((f"Enviado: {format_ecuador_time(sent_local)}",) if sent_local else ()),
             "Motivo: " + "; ".join(reasons[-3:]),
+            *(
+                ["Variación frente al último precio confirmado:", *_change_lines(prices, changes)]
+                if changed
+                else []
+            ),
             "El sistema seguirá buscando la fuente primaria o una corrección.",
             f"Fuente del reporte: {candidate.source.name}",
             candidate.url,
