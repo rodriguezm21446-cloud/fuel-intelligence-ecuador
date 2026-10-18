@@ -134,15 +134,21 @@ class Pipeline:
             return candidate
         title = translate_to_spanish(candidate.title, self.editor)
         body = translate_to_spanish(candidate.summary or candidate.body, self.editor)
+        translated = title.translated or body.translated
         self.store.record_pipeline_stage(
             "WF_05_TRANSLATOR",
-            "translated" if (title.translated or body.translated) else "untranslated",
+            "translated" if translated else "untranslated",
             f"title={title.engine} body={body.engine}",
         )
+        # Never surface raw English: if no engine produced a translation, keep a
+        # Spanish notice and the link instead of the foreign original.
         return replace(
             candidate,
-            title=title.text if title.translated else candidate.title,
-            summary=body.text if body.translated else candidate.summary,
+            title=title.text if title.translated else "Noticia en inglés; traducción no disponible",
+            summary=body.text if body.translated else (
+                "El texto original está en inglés. Abre el enlace para leerlo; "
+                "la traducción automática no está disponible en este momento."
+            ),
         )
 
     def _send_sections(self, item_id: int, sections: TelegramSections) -> bool:

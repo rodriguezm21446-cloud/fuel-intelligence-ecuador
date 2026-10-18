@@ -26,6 +26,18 @@ class _SpyEditor:
         return None
 
 
+class _DeadEditor:
+    enabled = True
+    model = "dead"
+    last_error = ""
+
+    def translate(self, text, target_language="es"):
+        return None
+
+    def review(self, evidence, fallback_x):
+        return None
+
+
 class LanguageTests(unittest.TestCase):
     def test_spanish_sentence_is_recognised(self):
         self.assertTrue(looks_spanish("El precio de la gasolina sube desde el 12"))
@@ -108,6 +120,13 @@ class PipelineTranslationTests(unittest.TestCase):
         )
         self._pipeline(editor).process(candidate)
         self.assertEqual(editor.calls, [])
+
+    def test_failed_translation_never_surfaces_english(self):
+        self._pipeline(_DeadEditor()).process(self._candidate())
+        joined = "\n".join(self.notifier.messages)
+        self.assertNotIn("refinery halts operations", joined)
+        self.assertNotIn("traders said", joined)
+        self.assertIn("traducción no disponible", joined)
 
 
 if __name__ == "__main__":
