@@ -40,6 +40,7 @@ class Settings:
     intraday_interval_seconds: int
     intraday_alert_cooldown_minutes: int
     news_max_age_hours: int
+    ecuador_only: bool
     request_timeout_seconds: int
     supabase_sync_minutes: int
     dry_run: bool
@@ -72,6 +73,7 @@ class Settings:
                 5, int(os.getenv("FUELINTEL_INTRADAY_ALERT_COOLDOWN_MINUTES", "30"))
             ),
             news_max_age_hours=int(os.getenv("FUELINTEL_NEWS_MAX_AGE_HOURS", "36")),
+            ecuador_only=_bool("FUELINTEL_ECUADOR_ONLY", True),
             request_timeout_seconds=int(os.getenv("FUELINTEL_REQUEST_TIMEOUT_SECONDS", "20")),
             supabase_sync_minutes=int(os.getenv("FUELINTEL_SUPABASE_SYNC_MINUTES", "10")),
             dry_run=_bool("FUELINTEL_DRY_RUN", True),

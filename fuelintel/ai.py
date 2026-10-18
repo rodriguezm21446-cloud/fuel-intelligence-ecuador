@@ -31,6 +31,11 @@ ANALYST_CONTRACT = (
 )
 
 
+def _numbers(value: str) -> Counter[str]:
+    """Extract comparable numeric tokens so a rewrite cannot silently drop a figure."""
+    return Counter(token.replace(",", ".") for token in re.findall(r"\d+(?:[.,]\d+)?", value))
+
+
 @dataclass(frozen=True, slots=True)
 class Editorial:
     analysis: str
@@ -108,23 +113,91 @@ class GeminiEditor:
             if not analysis or not x_text:
                 self.last_error = "Gemini devolvió campos editoriales vacíos"
                 return None
-            def numbers(value: str) -> Counter[str]:
-                return Counter(token.replace(",", ".") for token in re.findall(r"\d+(?:[.,]\d+)?", value))
-
-            allowed_numbers = numbers(evidence + "\n" + fallback_x)
-            generated_numbers = numbers(analysis + "\n" + x_text + "\n" + doubts)
+            allowed_numbers = _numbers(evidence + "\n" + fallback_x)
+            generated_numbers = _numbers(analysis + "\n" + x_text + "\n" + doubts)
             # The same verified figure may legitimately appear in both the
             # analysis and the X text; only brand-new figures are rejected.
             invented_numbers = [token for token in generated_numbers if token not in allowed_numbers]
             if invented_numbers:
                 self.last_error = "respuesta descartada: Gemini añadió cifras no presentes en la evidencia"
                 return None
-            required_x_numbers = numbers(fallback_x)
-            generated_x_numbers = numbers(x_text)
+            required_x_numbers = _numbers(fallback_x)
+            generated_x_numbers = _numbers(x_text)
             if any(generated_x_numbers[token] < count for token, count in required_x_numbers.items()):
                 self.last_error = "respuesta descartada: Gemini omitió cifras del borrador verificado"
                 return None
             return Editorial(analysis, x_text, doubts)
+        except urllib.error.HTTPError as error:
+            try:
+                detail = json.loads(error.read().decode("utf-8", errors="replace"))
+                message = detail.get("error", {}).get("message", "respuesta rechazada")
+            except (TypeError, ValueError):
+                message = "respuesta rechazada"
+            self.last_error = f"HTTP {error.code}: {message}"[:500]
+            return None
+        except (KeyError, IndexError, TypeError, ValueError, TimeoutError, urllib.error.URLError) as error:
+            self.last_error = f"{type(error).__name__}: {error}"[:500]
+            return None
+
+    def translate(self, text: str, target_language: str = "es") -> str | None:
+        """Translate a foreign headline/summary to Spanish, preserving every figure.
+
+        The engine is the preferred one; when it is unavailable or drops a figure
+        the caller falls back to a local engine so no raw English reaches the user.
+        """
+        self.last_error = ""
+        if not self.enabled:
+            self.last_error = "GEMINI_API_KEY no está configurada"
+            return None
+        clean = collapse_spaces(text or "")
+        if not clean:
+            return None
+        prompt = (
+            f"Traduce al {target_language} el siguiente texto de una noticia de combustibles. "
+            "Conserva intactos TODOS los números, fechas, porcentajes, unidades, nombres propios, "
+            "tickers y siglas: no los redondees, omitas ni traduzcas. No resumas, no añadas, no expliques. "
+            "Devuelve únicamente la traducción, sin comillas ni comentarios.\n\n"
+            f"TEXTO:\n{clean[:4000]}"
+        )
+        schema = {
+            "type": "object",
+            "properties": {"translation": {"type": "string"}},
+            "required": ["translation"],
+        }
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 1000,
+                "responseMimeType": "application/json",
+                "responseSchema": schema,
+            },
+        }
+        request = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "x-goog-api-key": self.api_key,
+                "Content-Type": "application/json",
+                "User-Agent": "FuelIntelligenceEcuador/0.3",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                raw = json.loads(response.read().decode("utf-8"))
+            content = raw["candidates"][0]["content"]["parts"][0]["text"]
+            parsed = json.loads(content)
+            translation = collapse_spaces(str(parsed.get("translation", ""))).strip()
+            if not translation:
+                self.last_error = "Gemini devolvió una traducción vacía"
+                return None
+            source_numbers = _numbers(clean)
+            translated_numbers = _numbers(translation)
+            if any(translated_numbers[token] < count for token, count in source_numbers.items()):
+                self.last_error = "traducción descartada: se perdieron cifras del original"
+                return None
+            return translation
         except urllib.error.HTTPError as error:
             try:
                 detail = json.loads(error.read().decode("utf-8", errors="replace"))

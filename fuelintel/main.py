@@ -45,6 +45,7 @@ def build_runtime(settings: Settings):
         editor=editor,
         chart_generator=generate_dashboard,
         market_chart_generator=generate_event_market_chart,
+        ecuador_only=settings.ecuador_only,
     )
     return store, poller, notifier, pipeline
 

@@ -123,6 +123,22 @@ ECUADOR_CHANGE_TERMS = {
 }
 
 
+# Ecuador anchors: words that tie a story to Ecuador even when an international
+# outlet reports it. A foreign market story without an anchor is kept as context
+# for the analyst but is never published, which keeps the channel free of noise.
+ECUADOR_ANCHOR_TERMS = {
+    "ecuador", "ecuatoriano", "ecuatoriana", "petroecuador", "ep petroecuador",
+    "arch", "esmeraldas", "shushufindi", "lago agrio", "sacha", "ocp", "sote",
+    "refineria de esmeraldas", "ecopais", "noboa", "banda de precios",
+}
+
+
+def has_ecuador_anchor(candidate: Candidate) -> bool:
+    """True when a story explicitly names Ecuador or one of its fuel assets."""
+    text = fold(f"{candidate.title} {candidate.summary} {candidate.body}")
+    return any(term in text for term in ECUADOR_ANCHOR_TERMS)
+
+
 def _contains(text: str, term: str) -> bool:
     if term not in AMBIGUOUS_TERMS:
         return term in text
@@ -164,6 +180,8 @@ def evaluate_candidate(
     candidate: Candidate,
     now: datetime,
     effective_period: EffectivePeriod | None = None,
+    *,
+    ecuador_only: bool = False,
 ) -> Decision:
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
@@ -172,6 +190,14 @@ def evaluate_candidate(
 
     if score < 5:
         return Decision(VerificationStatus.REJECTED, 0, ("contenido no relacionado",), score)
+
+    if ecuador_only and candidate.source.country != "EC" and not has_ecuador_anchor(candidate):
+        return Decision(
+            VerificationStatus.REJECTED,
+            0,
+            ("publicación internacional sin anclaje Ecuador: se conserva solo como contexto",),
+            score,
+        )
 
     if effective_period is not None:
         local_day = now.date()

@@ -27,6 +27,7 @@ from .sources import SourcePoller
 from .storage import Store
 from .telegram import TelegramNotifier
 from .text import canonical_url
+from .translate import looks_spanish, translate_to_spanish
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,7 @@ class Pipeline:
         editor: GeminiEditor | None = None,
         chart_generator=None,
         market_chart_generator=None,
+        ecuador_only: bool = False,
     ):
         self.store = store
         self.poller = poller
@@ -55,6 +57,7 @@ class Pipeline:
         self.editor = editor
         self.chart_generator = chart_generator
         self.market_chart_generator = market_chart_generator
+        self.ecuador_only = ecuador_only
 
     def _send_event_chart(self, item_id: int, candidate: Candidate, local_now: datetime) -> bool:
         """Send at most one context chart for a material story, before its text."""
@@ -124,6 +127,24 @@ class Pipeline:
         )
         return editorial
 
+    def _ensure_spanish(self, candidate: Candidate) -> Candidate:
+        """Translate a foreign headline/summary so nothing reaches the user in English."""
+        combined = f"{candidate.title}. {candidate.summary or candidate.body}"
+        if looks_spanish(combined):
+            return candidate
+        title = translate_to_spanish(candidate.title, self.editor)
+        body = translate_to_spanish(candidate.summary or candidate.body, self.editor)
+        self.store.record_pipeline_stage(
+            "WF_05_TRANSLATOR",
+            "translated" if (title.translated or body.translated) else "untranslated",
+            f"title={title.engine} body={body.engine}",
+        )
+        return replace(
+            candidate,
+            title=title.text if title.translated else candidate.title,
+            summary=body.text if body.translated else candidate.summary,
+        )
+
     def _send_sections(self, item_id: int, sections: TelegramSections) -> bool:
         """Send each section separately and resume without duplicating prior parts."""
         delivered = True
@@ -179,7 +200,7 @@ class Pipeline:
         if duplicate:
             return ProcessResult(VerificationStatus.DUPLICATE, False, 0, duplicate_reason)
 
-        decision = evaluate_candidate(candidate, local_now, period)
+        decision = evaluate_candidate(candidate, local_now, period, ecuador_only=self.ecuador_only)
         # Terminal freshness decisions must never be promoted by corroboration,
         # price extraction or a missing primary source later in the pipeline.
         if decision.status in {VerificationStatus.STALE, VerificationStatus.REJECTED}:
@@ -311,6 +332,7 @@ class Pipeline:
                 and 72 <= candidate.source.trust < 90
                 and initial_score >= 12
             ):
+                candidate = self._ensure_spanish(candidate)
                 editorial = None
                 if self.editor:
                     evidence = (
@@ -405,6 +427,7 @@ class Pipeline:
         else:
             if not allow_notify:
                 return ProcessResult(decision.status, False, item_id, "línea base guardada sin notificar")
+            candidate = self._ensure_spanish(candidate)
             fallback = format_news_alert(candidate, local_now, corroborated, sent_local=sent_local)
             fallback_x = fallback.split("TEXTO PARA X:\n", 1)[-1].split("\n\nFuente:", 1)[0]
             editorial = self._review(fallback, fallback_x, "verified-news", self._analysis_context(candidate))
