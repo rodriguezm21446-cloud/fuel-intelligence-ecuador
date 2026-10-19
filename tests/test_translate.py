@@ -48,6 +48,13 @@ class LanguageTests(unittest.TestCase):
     def test_numbers_and_proper_nouns_default_to_spanish(self):
         self.assertTrue(looks_spanish("PETROECUADOR 2026"))
 
+    def test_arabic_is_never_spanish(self):
+        self.assertFalse(looks_spanish("ارتفاع أسعار النفط"))
+        self.assertFalse(looks_spanish("تعطل إمدادات الخام"))
+
+    def test_cyrillic_is_never_spanish(self):
+        self.assertFalse(looks_spanish("Нефть растёт"))
+
 
 class TranslateToSpanishTests(unittest.TestCase):
     def test_spanish_input_is_left_untouched(self):
@@ -57,6 +64,11 @@ class TranslateToSpanishTests(unittest.TestCase):
 
     def test_engine_translates_foreign_text(self):
         result = translate_to_spanish("Diesel is up", _SpyEditor())
+        self.assertTrue(result.translated)
+        self.assertEqual(result.engine, "gemini")
+
+    def test_arabic_is_sent_to_the_engine(self):
+        result = translate_to_spanish("ارتفاع أسعار النفط بعد تعطل الإمدادات", _SpyEditor())
         self.assertTrue(result.translated)
         self.assertEqual(result.engine, "gemini")
 
@@ -120,6 +132,42 @@ class PipelineTranslationTests(unittest.TestCase):
         )
         self._pipeline(editor).process(candidate)
         self.assertEqual(editor.calls, [])
+
+    def test_spanish_headline_over_english_body_is_translated(self):
+        editor = _SpyEditor()
+        candidate = Candidate(
+            source=self.INTL,
+            title="El diésel sube en Ecuador",
+            url="https://example.test/wire/mixed",
+            summary="Diesel is up after a supply cut, traders said.",
+            published_at=datetime(2026, 9, 8, 14, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2026, 9, 8, 14, 5, tzinfo=timezone.utc),
+            content_hash="intl-mixed",
+        )
+        self._pipeline(editor).process(candidate)
+        self.assertTrue(editor.calls)
+        joined = "\n".join(self.notifier.messages)
+        self.assertIn("El diésel sube en Ecuador", joined)
+        self.assertIn("Traducción al español", joined)
+        self.assertNotIn("supply cut", joined)
+
+    def test_arabic_news_is_translated_not_sent_raw(self):
+        editor = _SpyEditor()
+        candidate = Candidate(
+            source=self.INTL,
+            title="ارتفاع أسعار النفط",
+            url="https://example.test/wire/arabic",
+            summary="تعطل إمدادات الخام بعد هجوم",
+            published_at=datetime(2026, 9, 8, 14, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2026, 9, 8, 14, 5, tzinfo=timezone.utc),
+            content_hash="intl-arabic",
+        )
+        result = self._pipeline(editor).process(candidate)
+        self.assertEqual(result.status, VerificationStatus.VERIFIED)
+        self.assertTrue(editor.calls)
+        joined = "\n".join(self.notifier.messages)
+        self.assertNotIn("النفط", joined)
+        self.assertIn("Traducción al español", joined)
 
     def test_failed_translation_never_surfaces_english(self):
         self._pipeline(_DeadEditor()).process(self._candidate())

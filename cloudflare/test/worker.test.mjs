@@ -7,7 +7,7 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
 const context = vm.createContext({ URL, Intl, AbortSignal, TextEncoder });
 vm.runInContext(source.replace("export default {", "const worker = {") +
-  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,SOURCES};", context);
+  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,fastAlarmKind,SOURCES};", context);
 const api = context.api;
 
 test("el detector distingue publicación reciente, antigua, futura y sin fecha", () => {
@@ -59,13 +59,24 @@ test("alarma inmediata es texto limpio de máximo 300 caracteres", async () => {
     return {ok: true, status: 200, json: async () => ({ok: true})};
   };
   const result = await api.sendFastTelegramAlarm({TELEGRAM_BOT_TOKEN: "fake", TELEGRAM_CHAT_ID: "fake"}, {
-    title: "El petróleo sube con fuerza ".repeat(30), source: {name: "CNBC Energy"},
+    title: "El precio de la gasolina baja en Ecuador ".repeat(30), source: {name: "Primicias"},
     url: "https://example.test", detectedAt: "2026-09-13T18:00:00Z"
-  }, "market");
+  }, "domestic");
   assert.equal(result.ok, true);
   assert.ok(body.text.length <= 300);
   assert.equal(body.parse_mode, undefined);
-  assert.match(body.text, /Impacto en Ecuador aún no confirmado/);
+  assert.match(body.text, /aún no es precio oficial/);
+});
+
+test("solo lo doméstico u oficial despierta al operador en el carril rápido", () => {
+  // Noticia internacional en árabe o inglés: nunca un aviso rápido crudo.
+  assert.equal(api.fastAlarmKind({ id: "telegram-aja-news" }, { title: "ارتفاع أسعار النفط", summary: "تعطل إمدادات الخام" }), "");
+  assert.equal(api.fastAlarmKind({ id: "cnbc-energy-rss" }, { title: "Brent jumps after pipeline outage", summary: "" }), "");
+  assert.equal(api.fastAlarmKind({ id: "oilprice-main-rss" }, { title: "Oil surges on supply cut", summary: "" }), "");
+  // Reporte doméstico de combustible: sí.
+  assert.equal(api.fastAlarmKind({ id: "google-news-ecuador-precios" }, { title: "Sube el precio de la gasolina en Ecuador", summary: "" }), "domestic");
+  // Fuente oficial de precios: sí.
+  assert.equal(api.fastAlarmKind({ id: "arch-precios" }, { title: "Precios de derivados", summary: "" }), "official");
 });
 
 test("squawk local: combustible + actor o cambio despierta al operador", () => {

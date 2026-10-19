@@ -28,6 +28,14 @@ _ENGLISH_HINTS = {
 
 _TOKEN_RE = re.compile(r"[a-záéíóúüñ]+")
 
+# Non-Latin scripts are never Spanish, even though they contain no a-z tokens.
+# Without this check Arabic/Cyrillic/CJK text would be mistaken for Spanish and
+# published untranslated.
+_NON_LATIN_RE = re.compile(
+    r"[\u0600-\u06FF\u0750-\u077F\u0590-\u05FF\u0400-\u04FF\u0370-\u03FF"
+    r"\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF\u0900-\u097F]"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class TranslationResult:
@@ -39,6 +47,8 @@ class TranslationResult:
 def looks_spanish(text: str) -> bool:
     """Cheap language check: accented characters settle it, else count hint words."""
     text = text or ""
+    if _NON_LATIN_RE.search(text):
+        return False
     if re.search(r"[áéíóúñü¿¡]", text, re.IGNORECASE):
         return True
     tokens = set(_TOKEN_RE.findall(text.lower()))

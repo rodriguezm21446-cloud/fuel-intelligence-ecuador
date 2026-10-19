@@ -135,6 +135,16 @@ function isOfficialFuelSource(source) {
   ]).has(source.id);
 }
 
+function fastAlarmKind(source, raw) {
+  // Only Ecuador-domestic reports and official price sources text the operator
+  // immediately. International market chatter (English or Arabic) is dispatched
+  // to the Python lane, which translates and summarises it, and must never page
+  // the operator with a raw foreign headline.
+  if (isDomesticPriceSignal(source, raw)) return "domestic";
+  if (isOfficialFuelSource(source)) return "official";
+  return "";
+}
+
 function escapeHtml(value = "") {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -144,11 +154,9 @@ async function sendFastTelegramAlarm(env, candidate, alarmKind) {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
     return { ok: false, waiting: true, error: "Telegram directo aún no configurado" };
   }
-  const qualification = alarmKind === "domestic"
-    ? "Reporte preliminar; aún no es precio oficial."
-    : alarmKind === "market"
-      ? "Impacto en Ecuador aún no confirmado."
-      : "Publicación oficial detectada; cifras en verificación.";
+  const qualification = alarmKind === "official"
+    ? "Publicación oficial detectada; cifras en verificación."
+    : "Reporte preliminar; aún no es precio oficial.";
   const suffix = ` ${qualification} Fuente: ${candidate.source.name}.`;
   const maximumTitle = Math.max(40, 300 - suffix.length);
   const clippedTitle = candidate.title.length <= maximumTitle
@@ -426,13 +434,7 @@ async function saveCandidate(env, source, raw, bootstrap, detectedAt) {
   }
 
   const candidate = { source, ...raw, detectedAt };
-  const alarmKind = isDomesticPriceSignal(source, raw)
-    ? "domestic"
-    : isOfficialFuelSource(source)
-      ? "official"
-      : isMarketSquawkSignal(source, raw)
-        ? "market"
-        : "";
+  const alarmKind = fastAlarmKind(source, raw);
   // This alarm is deliberately simple and source-attributed. It reaches the
   // operator before GitHub starts Python/Chromium; the detailed validation and
   // chart arrive later from the cloud job.
