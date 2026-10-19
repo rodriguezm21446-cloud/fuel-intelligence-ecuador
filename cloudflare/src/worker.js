@@ -109,23 +109,19 @@ function isDomesticPriceSignal(source, raw) {
   return hasEnergy && (hasChange || hasActor);
 }
 
-function isMarketSquawkSignal(source, raw) {
-  const fastSources = new Set([
-    "cnbc-energy-rss", "cnbc-finance-rss", "oilprice-main-rss",
-    "telegram-aja-news", "telegram-walter-bloomberg", "ukmto-maritime-security",
-    "x-bloomberg"
-  ]);
-  if (!fastSources.has(source.id)) return false;
+const HIGH_IMPACT_TERMS = [
+  "hormuz", "ormuz", "bab al-mandab", "red sea", "suez", "houthi", "opec", "opep",
+  "production cut", "output cut", "export ban", "sanction", "embargo", "supply disruption",
+  "pipeline outage", "refinery outage", "refinery fire", "tanker seized", "drone strike",
+  "oil terminal", "port closure", "supertanker", "strategic reserve", "spare capacity",
+  "هرمز", "باب المندب", "أوبك", "هجوم", "عقوبات", "إمدادات"
+];
+
+function isHighImpactForeign(raw) {
+  // Only major supply events justify waking the Python lane for a foreign story.
+  // Ordinary market chatter is dropped here to avoid noise, Actions runs and cost.
   const text = normalizeText(`${raw.title} ${raw.summary}`);
-  const market = ["oil", "crude", "brent", "wti", "gasoline", "diesel", "refinery", "rbob", "ulsd",
-    "pipeline", "tanker", "vessel", "shipping", "maritime", "hormuz", "bab al-mandab",
-    "نفط", "الخام", "بنزين", "ديزل", "مصفاة", "هرمز", "ناقلة"]
-    .some((word) => text.includes(word));
-  const event = ["surge", "jump", "rise", "fall", "drop", "attack", "outage", "shutdown", "pipeline",
-    "sanction", "inventory", "shortage", "opec", "supply", "disruption",
-    "ارتفاع", "انخفاض", "هبوط", "هجوم", "تعطل", "إغلاق", "عقوبات", "إمدادات"]
-    .some((word) => text.includes(word));
-  return market && event;
+  return HIGH_IMPACT_TERMS.some((word) => text.includes(word));
 }
 
 function isOfficialFuelSource(source) {
@@ -425,7 +421,7 @@ async function saveCandidate(env, source, raw, bootstrap, detectedAt) {
     if (match) corroboratedBy = match.source_name;
     // Dispatch domestic price reports immediately as unconfirmed warnings.
     // Python still blocks publication until ARCH or Petroecuador agrees.
-    if (!match && !isDomesticPriceSignal(source, raw) && !isMarketSquawkSignal(source, raw)) return;
+    if (!match && !isDomesticPriceSignal(source, raw) && !isHighImpactForeign(raw)) return;
     // First source raises the alarm; a second source corroborates it. Further
     // copies are stored for audit but do not start more runners or messages.
     // Different numbers or dates can be corrections, even with similar titles.

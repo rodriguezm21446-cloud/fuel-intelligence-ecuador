@@ -252,9 +252,32 @@ class FormattingTests(unittest.TestCase):
             summary="Los valores rigen desde el 12 de septiembre.",
         )
         sections = build_news_sections(candidate, local, False, sent_local=local)
-        self.assertLessEqual(len(sections.squawk), 300)
+        self.assertLessEqual(len(sections.squawk), 400)
+        self.assertLessEqual(len(sections.context), 400)
         self.assertNotEqual(sections.squawk, sections.context)
         self.assertNotIn(candidate.url, sections.squawk)
+        self.assertIn(candidate.url, sections.context)
+
+    def test_summary_from_editor_is_the_squawk_and_context_stays_under_400(self):
+        from fuelintel.ai import Editorial
+
+        local = datetime(2026, 9, 11, 9, 15, tzinfo=timezone(timedelta(hours=-5)))
+        candidate = Candidate(
+            source=OFFICIAL,
+            title="Titular original de la fuente",
+            url="https://example.test/nota",
+            summary="Cuerpo original de la fuente.",
+        )
+        editorial = Editorial(
+            analysis="Hecho: recorte de 1.5 millones de barriles diarios.",
+            x_text="Recorte de 1.5 M bpd.",
+            doubts="",
+            summary="La OPEP recorta 1.5 millones de barriles diarios de crudo; puede encarecer el diésel que importa Ecuador.",
+        )
+        sections = build_news_sections(candidate, local, True, editorial, local)
+        self.assertEqual(sections.squawk, editorial.summary)
+        self.assertLessEqual(len(sections.squawk), 400)
+        self.assertLessEqual(len(sections.context), 400)
         self.assertIn(candidate.url, sections.context)
 
 

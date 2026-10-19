@@ -118,6 +118,20 @@ def build_price_sections(
     return TelegramSections(squawk=squawk, context=context, forecast=forecast)
 
 
+NEWS_TEXT_LIMIT = 400
+
+
+def _fit_news_context(header: list[str], optional: list[str], tail: list[str]) -> str:
+    """Keep the header and the source/url tail; add optional blocks while they fit."""
+    kept: list[str] = []
+    for block in optional:
+        if len("\n".join(header + kept + [block] + tail)) <= NEWS_TEXT_LIMIT:
+            kept.append(block)
+        else:
+            break
+    return "\n".join(header + kept + tail)
+
+
 def build_news_sections(
     candidate: Candidate,
     detected_local: datetime,
@@ -127,13 +141,14 @@ def build_news_sections(
     *,
     confirmed: bool = True,
 ) -> TelegramSections:
-    """Create a concise squawk plus source analysis, never a repeated monolith."""
+    """Create a concise summary (≤400 chars) plus a source/context note, never a monolith."""
     excerpt = collapse_spaces(candidate.summary or candidate.body)
     fallback = trim_x(
-        f"{candidate.title}. {excerpt[:120]} Fuente: {candidate.source.name}.",
-        300,
+        f"{candidate.title}. {excerpt[:160]} Fuente: {candidate.source.name}.",
+        NEWS_TEXT_LIMIT,
     )
-    squawk = trim_x(editorial.x_text, 300) if editorial else fallback
+    summary = editorial.summary if editorial and editorial.summary else ""
+    squawk = trim_x(summary or fallback, NEWS_TEXT_LIMIT)
     if not confirmed:
         status = "una sola fuente; pendiente de corroboración"
     elif candidate.source.trust >= 90:
@@ -146,20 +161,18 @@ def build_news_sections(
         "El hecho se conserva atribuido a la fuente. No hay evidencia suficiente para presentar "
         "una correlación de mercado como causa comprobada."
     )
-    context = "\n".join(
-        [
-            "VERIFICACIÓN Y CONTEXTO",
-            f"Estado: {status}.",
-            f"Detectado: {format_ecuador_time(detected_local)}",
-            *((f"Enviado: {format_ecuador_time(sent_local)}",) if sent_local else ()),
-            f"Qué sabemos: {analysis}",
-            f"Posible canal hacia Ecuador: {market_impact_channel(candidate)}",
-            *((f"Dudas: {editorial.doubts}",) if editorial and editorial.doubts else ()),
-            f"Fuente: {candidate.source.name}",
-            candidate.url,
-        ]
-    )
-    return TelegramSections(squawk=squawk, context=context)
+    header = [
+        "VERIFICACIÓN Y CONTEXTO",
+        f"Estado: {status}.",
+        f"Detectado: {format_ecuador_time(detected_local)}",
+    ]
+    if sent_local:
+        header.append(f"Enviado: {format_ecuador_time(sent_local)}")
+    optional = [f"Qué sabemos: {analysis}", f"Canal hacia Ecuador: {market_impact_channel(candidate)}"]
+    if editorial and editorial.doubts:
+        optional.append(f"Dudas: {editorial.doubts}")
+    tail = [f"Fuente: {candidate.source.name}", candidate.url]
+    return TelegramSections(squawk=squawk, context=_fit_news_context(header, optional, tail))
 
 
 def _has_real_change(changes: dict[str, PriceChange] | None) -> bool:

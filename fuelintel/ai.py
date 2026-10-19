@@ -26,8 +26,17 @@ ANALYST_CONTRACT = (
     "tomador de precio, y su precio interno depende de un decreto del Gobierno. Estructura el 'analysis' en "
     "cuatro bloques con estos encabezados exactos: 'Hecho:', 'Drivers medidos:', 'Canal hacia Ecuador:' e "
     "'Incertidumbre:'. En 'Drivers medidos' separa lo medido de lo inferido y escribe 'no verificado' cuando "
-    "el vínculo no esté en la evidencia. En 'Incertidumbre' declara de forma explícita lo que no puede saberse "
-    "con la evidencia, en particular cuándo y cuánto cambiará el precio oficial en Ecuador."
+            "el vínculo no esté en la evidencia. En 'Incertidumbre' declara de forma explícita lo que no puede saberse "
+            "con la evidencia, en particular cuándo y cuánto cambiará el precio oficial en Ecuador."
+    )
+
+# The summary is the message the operator reads first: one short Spanish block
+# (≤400 characters) with the necessary data, never a paraphrase without figures.
+SUMMARY_CONTRACT = (
+    "Además, en 'summary' escribe un resumen en español de máximo 400 caracteres con la data "
+    "necesaria: qué pasó, las cifras clave y el canal hacia Ecuador. Sin relleno, sin repetir la "
+    "frase de la fuente y sin inventar datos que no estén en la evidencia. Si es una noticia "
+    "internacional, escribe en español claro para un lector ecuatoriano."
 )
 
 
@@ -41,6 +50,7 @@ class Editorial:
     analysis: str
     x_text: str
     doubts: str = ""
+    summary: str = ""
 
 
 class GeminiEditor:
@@ -69,7 +79,7 @@ class GeminiEditor:
             "intégralos de forma fría y ordenada para explicar el contexto ecuatoriano. No escribas ninguna "
             "cifra (años, horas, porcentajes, conteos ni numeración de listas) que no aparezca literalmente en la "
             "evidencia. El análisis tendrá máximo 1100 caracteres y el texto para X máximo 280. "
-            f"{ANALYST_CONTRACT} {EDITORIAL_GUARDRAILS}\n\n"
+            f"{ANALYST_CONTRACT} {SUMMARY_CONTRACT} {EDITORIAL_GUARDRAILS}\n\n"
             f"EVIDENCIA VERIFICADA:\n{evidence[:12000]}\n\n"
             f"BORRADOR SEGURO PARA X:\n{fallback_x}\n\n"
             "Conserva exactamente las cifras comprobadas."
@@ -77,11 +87,12 @@ class GeminiEditor:
         schema = {
             "type": "object",
             "properties": {
+                "summary": {"type": "string"},
                 "analysis": {"type": "string"},
                 "x_text": {"type": "string"},
                 "doubts": {"type": "string"},
             },
-            "required": ["analysis", "x_text", "doubts"],
+            "required": ["summary", "analysis", "x_text", "doubts"],
         }
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -110,11 +121,12 @@ class GeminiEditor:
             analysis = tidy_lines(str(parsed.get("analysis", "")))[:1100].strip()
             x_text = trim_x(collapse_spaces(str(parsed.get("x_text", ""))), 280)
             doubts = collapse_spaces(str(parsed.get("doubts", "")))[:300].strip()
+            summary = collapse_spaces(str(parsed.get("summary", "")))[:400].strip() or x_text
             if not analysis or not x_text:
                 self.last_error = "Gemini devolvió campos editoriales vacíos"
                 return None
             allowed_numbers = _numbers(evidence + "\n" + fallback_x)
-            generated_numbers = _numbers(analysis + "\n" + x_text + "\n" + doubts)
+            generated_numbers = _numbers(analysis + "\n" + x_text + "\n" + doubts + "\n" + summary)
             # The same verified figure may legitimately appear in both the
             # analysis and the X text; only brand-new figures are rejected.
             invented_numbers = [token for token in generated_numbers if token not in allowed_numbers]
@@ -126,7 +138,7 @@ class GeminiEditor:
             if any(generated_x_numbers[token] < count for token, count in required_x_numbers.items()):
                 self.last_error = "respuesta descartada: Gemini omitió cifras del borrador verificado"
                 return None
-            return Editorial(analysis, x_text, doubts)
+            return Editorial(analysis=analysis, x_text=x_text, doubts=doubts, summary=summary)
         except urllib.error.HTTPError as error:
             try:
                 detail = json.loads(error.read().decode("utf-8", errors="replace"))

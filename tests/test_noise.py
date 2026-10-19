@@ -48,12 +48,18 @@ class AnchorTests(unittest.TestCase):
 
 
 class NoiseGateTests(unittest.TestCase):
-    def test_foreign_market_story_is_rejected_as_context(self):
+    def test_common_foreign_market_story_is_rejected_as_context(self):
         decision = evaluate_candidate(
-            _candidate("Oil prices rise on an OPEC supply cut"), NOW, ecuador_only=True
+            _candidate("Oil prices edge higher on strong demand"), NOW, ecuador_only=True
         )
         self.assertEqual(decision.status, VerificationStatus.REJECTED)
         self.assertIn("anclaje", " ".join(decision.reasons))
+
+    def test_high_impact_foreign_story_is_kept(self):
+        decision = evaluate_candidate(
+            _candidate("Tanker seized near the Strait of Hormuz"), NOW, ecuador_only=True
+        )
+        self.assertNotEqual(decision.status, VerificationStatus.REJECTED)
 
     def test_foreign_story_naming_ecuador_is_kept(self):
         decision = evaluate_candidate(
@@ -63,7 +69,7 @@ class NoiseGateTests(unittest.TestCase):
 
     def test_gate_off_keeps_the_foreign_story(self):
         decision = evaluate_candidate(
-            _candidate("Oil prices rise on an OPEC supply cut"), NOW, ecuador_only=False
+            _candidate("Oil prices edge higher on strong demand"), NOW, ecuador_only=False
         )
         self.assertNotEqual(decision.status, VerificationStatus.REJECTED)
 

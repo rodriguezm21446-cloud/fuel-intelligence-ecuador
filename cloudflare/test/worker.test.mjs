@@ -7,7 +7,7 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
 const context = vm.createContext({ URL, Intl, AbortSignal, TextEncoder });
 vm.runInContext(source.replace("export default {", "const worker = {") +
-  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,fastAlarmKind,SOURCES};", context);
+  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,fastAlarmKind,isHighImpactForeign,SOURCES};", context);
 const api = context.api;
 
 test("el detector distingue publicación reciente, antigua, futura y sin fecha", () => {
@@ -91,6 +91,16 @@ test("squawk local: combustible + actor o cambio despierta al operador", () => {
   assert.equal(api.isDomesticPriceSignal(source, { title: "El precio del banano sube", summary: "" }), false);
   // Fuente no doméstica: nunca dispara como local.
   assert.equal(api.isDomesticPriceSignal({ id: "cnbc-energy-rss" }, { title: "Noboa y la gasolina", summary: "" }), false);
+});
+
+test("solo el alto impacto internacional se despacha al lane de Python", () => {
+  // Eventos mayores: sí se despachan (se traducen y resumen).
+  assert.equal(api.isHighImpactForeign({ title: "Strait of Hormuz closed after attack", summary: "" }), true);
+  assert.equal(api.isHighImpactForeign({ title: "ارتفاع أسعار النفط بعد هجوم على ناقلة", summary: "هرمز" }), true);
+  assert.equal(api.isHighImpactForeign({ title: "OPEC announces a production cut", summary: "" }), true);
+  // Ruido común de mercado: no se despacha.
+  assert.equal(api.isHighImpactForeign({ title: "Oil edges higher on demand hopes", summary: "" }), false);
+  assert.equal(api.isHighImpactForeign({ title: "Analysis: oil market outlook", summary: "" }), false);
 });
 
 test("las fuentes del squawk local están registradas como críticas", () => {

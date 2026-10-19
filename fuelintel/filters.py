@@ -139,6 +139,29 @@ def has_ecuador_anchor(candidate: Candidate) -> bool:
     return any(term in text for term in ECUADOR_ANCHOR_TERMS)
 
 
+# Major international supply events that can move Ecuador's import/export costs
+# even without naming the country. They are the only foreign stories that are
+# published (translated and summarised); the rest stays context-only.
+HIGH_IMPACT_FOREIGN_TERMS = {
+    "hormuz", "strait of hormuz", "ormuz", "bab al-mandab", "red sea", "mar rojo",
+    "suez", "houthi", "huti", "opec", "opep", "production cut", "recorte de produccion",
+    "output cut", "export ban", "prohibicion de exportacion", "sanction", "sancion",
+    "embargo", "pipeline outage", "oleoducto", "refinery outage", "refinery fire",
+    "refinery explosion", "incendio en la refineria", "tanker seized", "buque secuestrado",
+    "drone strike", "ataque con drones", "oil supply", "suministro de petroleo",
+    "supply disruption", "interrupcion del suministro", "port closure", "cierre de puerto",
+    "supertanker", "oil terminal", "terminal petrolera", "strategic reserve",
+    "reserva estrategica", "spare capacity",
+    "هرمز", "باب المندب", "أوبك", "هجوم", "عقوبات", "إمدادات", "مصفاة", "ناقلة",
+}
+
+
+def is_high_impact_foreign(candidate: Candidate) -> bool:
+    """True when a foreign story is a major supply event worth publishing."""
+    text = fold(f"{candidate.title} {candidate.summary} {candidate.body}")
+    return any(term in text for term in HIGH_IMPACT_FOREIGN_TERMS)
+
+
 def _contains(text: str, term: str) -> bool:
     if term not in AMBIGUOUS_TERMS:
         return term in text
@@ -191,11 +214,16 @@ def evaluate_candidate(
     if score < 5:
         return Decision(VerificationStatus.REJECTED, 0, ("contenido no relacionado",), score)
 
-    if ecuador_only and candidate.source.country != "EC" and not has_ecuador_anchor(candidate):
+    if (
+        ecuador_only
+        and candidate.source.country != "EC"
+        and not has_ecuador_anchor(candidate)
+        and not is_high_impact_foreign(candidate)
+    ):
         return Decision(
             VerificationStatus.REJECTED,
             0,
-            ("publicación internacional sin anclaje Ecuador: se conserva solo como contexto",),
+            ("noticia internacional común sin anclaje Ecuador: se conserva solo como contexto",),
             score,
         )
 
