@@ -128,28 +128,36 @@ class Pipeline:
         return editorial
 
     def _ensure_spanish(self, candidate: Candidate) -> Candidate:
-        """Translate a foreign headline/summary so nothing reaches the user in English."""
-        combined = f"{candidate.title}. {candidate.summary or candidate.body}"
-        if looks_spanish(combined):
+        """Translate any non-Spanish title or summary so nothing foreign reaches the user.
+
+        Title and body are checked separately: a Spanish headline over an English
+        quotation must not hide an untranslated body.
+        """
+        body_text = candidate.summary or candidate.body or ""
+        title_needs = not looks_spanish(candidate.title or "")
+        body_needs = not looks_spanish(body_text)
+        if not (title_needs or body_needs):
             return candidate
-        title = translate_to_spanish(candidate.title, self.editor)
-        body = translate_to_spanish(candidate.summary or candidate.body, self.editor)
-        translated = title.translated or body.translated
+        title = translate_to_spanish(candidate.title, self.editor) if title_needs else None
+        body = translate_to_spanish(body_text, self.editor) if body_needs else None
+        translated = bool((title and title.translated) or (body and body.translated))
         self.store.record_pipeline_stage(
             "WF_05_TRANSLATOR",
             "translated" if translated else "untranslated",
-            f"title={title.engine} body={body.engine}",
+            f"title={title.engine if title else 'es'} body={body.engine if body else 'es'}",
         )
-        # Never surface raw English: if no engine produced a translation, keep a
-        # Spanish notice and the link instead of the foreign original.
-        return replace(
-            candidate,
-            title=title.text if title.translated else "Noticia en inglés; traducción no disponible",
-            summary=body.text if body.translated else (
-                "El texto original está en inglés. Abre el enlace para leerlo; "
+        # Never surface a foreign original: if no engine produced a translation,
+        # keep a Spanish notice and the link instead of the raw text.
+        new_title = candidate.title
+        if title_needs:
+            new_title = title.text if title.translated else "Noticia en otro idioma; traducción no disponible"
+        new_summary = candidate.summary
+        if body_needs:
+            new_summary = body.text if body.translated else (
+                "El texto original está en otro idioma. Abre el enlace para leerlo; "
                 "la traducción automática no está disponible en este momento."
-            ),
-        )
+            )
+        return replace(candidate, title=new_title, summary=new_summary)
 
     def _send_sections(self, item_id: int, sections: TelegramSections) -> bool:
         """Send each section separately and resume without duplicating prior parts."""
