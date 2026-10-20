@@ -38,6 +38,24 @@ class _DeadEditor:
         return None
 
 
+class _InventingEditor:
+    enabled = True
+    model = "inventing"
+    last_error = ""
+
+    def translate(self, text, target_language="es"):
+        return None
+
+    def review(self, evidence, fallback_x):
+        from fuelintel.ai import Editorial
+        return Editorial(
+            analysis="El precio subió mucho.",
+            x_text="Subió mucho.",
+            doubts="",
+            summary="El precio subió a $9.99 el 12 de octubre.",
+        )
+
+
 class LanguageTests(unittest.TestCase):
     def test_spanish_sentence_is_recognised(self):
         self.assertTrue(looks_spanish("El precio de la gasolina sube desde el 12"))
@@ -175,6 +193,25 @@ class PipelineTranslationTests(unittest.TestCase):
         self.assertNotIn("refinery halts operations", joined)
         self.assertNotIn("traders said", joined)
         self.assertIn("traducción no disponible", joined)
+
+    def test_invented_summary_replaced_by_extractive(self):
+        editor = _InventingEditor()
+        candidate = Candidate(
+            source=self.INTL,
+            title="El precio del diésel sube en Ecuador",
+            url="https://example.test/wire/inventing",
+            summary="El precio del diésel es de $3.21 desde el 12 de octubre, según fuentes del sector.",
+            published_at=datetime(2026, 9, 8, 14, 0, tzinfo=timezone.utc),
+            detected_at=datetime(2026, 9, 8, 14, 5, tzinfo=timezone.utc),
+            content_hash="intl-inventing",
+        )
+        result = self._pipeline(editor).process(candidate)
+        self.assertEqual(result.status, VerificationStatus.VERIFIED)
+        joined = "\n".join(self.notifier.messages)
+        # Invented number must not surface
+        self.assertNotIn("$9.99", joined)
+        # Extractive fallback from source text should appear
+        self.assertIn("$3.21", joined)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fuelintel.ai import ANALYST_CONTRACT, EDITORIAL_GUARDRAILS, GeminiEditor
+from fuelintel.ai import ANALYST_CONTRACT, EDITORIAL_GUARDRAILS, Editorial, GeminiEditor, extractive_summary, fact_check_summary
 
 
 class GeminiTests(unittest.TestCase):
@@ -68,6 +68,37 @@ class GeminiTests(unittest.TestCase):
         editor = GeminiEditor("secret", "gemini-3.5-flash-lite")
         self.assertIsNone(editor.review("Extra $3.21 y diésel $4.50.", "Extra $3.21 | Diésel $4.50."))
         self.assertIn("omitió cifras", editor.last_error)
+
+
+class FactCheckTests(unittest.TestCase):
+    def test_summary_with_all_numbers_passes(self):
+        summary = "El precio subió a $3.21 el 12 de octubre."
+        source = "El precio del combustible es de $3.21 desde el 12 de octubre."
+        ok, reason, missing = fact_check_summary(summary, source)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+        self.assertEqual(missing, [])
+
+    def test_summary_with_invented_number_fails(self):
+        summary = "El precio subió a $9.99 el 12 de octubre."
+        source = "El precio del combustible es de $3.21 desde el 12 de octubre."
+        ok, reason, missing = fact_check_summary(summary, source)
+        self.assertFalse(ok)
+        self.assertIn("9.99", missing)
+
+    def test_extractive_summary_picks_sentence_with_numbers(self):
+        text = "La gasolina sube. El diésel está a $3.21 desde octubre. No hay novedades."
+        result = extractive_summary(text)
+        self.assertIn("$3.21", result)
+        self.assertLessEqual(len(result), 400)
+
+    def test_extractive_summary_empty_input(self):
+        self.assertEqual(extractive_summary(""), "")
+
+    def test_extractive_summary_no_numbers_picks_first(self):
+        text = "Solo hay texto aquí. Nada de números."
+        result = extractive_summary(text)
+        self.assertIn("Solo hay texto aquí.", result)
 
 
 if __name__ == "__main__":

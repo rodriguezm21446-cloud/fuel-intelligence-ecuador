@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from .ai import GeminiEditor
+from .ai import Editorial, GeminiEditor, extractive_summary, fact_check_summary
 from .calculations import price_change
 from .charts import generate_reported_price_chart
 from .extractors import extract_effective_period, extract_fuel_prices
@@ -158,6 +158,21 @@ class Pipeline:
                 "la traducción automática no está disponible en este momento."
             )
         return replace(candidate, title=new_title, summary=new_summary)
+
+    def _ensure_summary_fact_checked(self, candidate: Candidate, editorial: Editorial | None) -> Editorial | None:
+        """Verifica que el resumen no invente datos; si falla, usa resumen extractivo de la fuente."""
+        if editorial is None:
+            return None
+        if editorial.summary:
+            source_text = f"{candidate.title}. {candidate.summary or candidate.body}"
+            ok, reason, missing = fact_check_summary(editorial.summary, source_text)
+            if not ok:
+                self.store.record_pipeline_stage(
+                    "WF_05_TRANSLATOR", "summary_fact_check_failed", reason
+                )
+                summary = extractive_summary(source_text)
+                return replace(editorial, summary=summary)
+        return editorial
 
     def _send_sections(self, item_id: int, sections: TelegramSections) -> bool:
         """Send each section separately and resume without duplicating prior parts."""
@@ -354,6 +369,7 @@ class Pipeline:
                         f"Fuente: {candidate.source.name}\nTexto: {candidate.summary or candidate.title}"
                     )
                     editorial = self._review(evidence, candidate.title, "early-news", self._analysis_context(candidate))
+                    editorial = self._ensure_summary_fact_checked(candidate, editorial)
                 if initial_score >= 18:
                     self._send_event_chart(item_id, candidate, local_now)
                 early_warning_sent = self._send_sections(
@@ -445,6 +461,7 @@ class Pipeline:
             fallback = format_news_alert(candidate, local_now, corroborated, sent_local=sent_local)
             fallback_x = fallback.split("TEXTO PARA X:\n", 1)[-1].split("\n\nFuente:", 1)[0]
             editorial = self._review(fallback, fallback_x, "verified-news", self._analysis_context(candidate))
+            editorial = self._ensure_summary_fact_checked(candidate, editorial)
             sections = build_news_sections(candidate, local_now, corroborated, editorial, sent_local)
             if initial_score >= 18:
                 self._send_event_chart(item_id, candidate, local_now)

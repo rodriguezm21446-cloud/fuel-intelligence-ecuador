@@ -45,6 +45,43 @@ def _numbers(value: str) -> Counter[str]:
     return Counter(token.replace(",", ".") for token in re.findall(r"\d+(?:[.,]\d+)?", value))
 
 
+def _entities(text: str) -> list[str]:
+    """Extrae entidades (palabras capitalizadas) y números del texto fuente."""
+    return re.findall(r"\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b|\d+(?:[.,]\d+)?", text or "")
+
+
+def fact_check_summary(summary_text: str, source_text: str) -> tuple[bool, str, list[str]]:
+    """Verifica que todo número y entidad del resumen aparezca en el texto fuente.
+
+    Devuelve (ok, motivo, faltantes). Si falta algo, el resumen no es fiable.
+    """
+    if not summary_text or not source_text:
+        return True, "", []
+    summary_tokens = set(_entities(summary_text))
+    source_tokens = set(_entities(source_text))
+    missing = sorted(t for t in summary_tokens if t not in source_tokens)
+    if missing:
+        return False, f"datos no presentes en la fuente: {', '.join(missing[:5])}", missing
+    return True, "", []
+
+
+def extractive_summary(source_text: str, limit: int = 400) -> str:
+    """Resumen extractivo: toma la oración con más datos numéricos y entidades clave.
+
+    Nunca inventa cifras: solo reordena/corta lo que ya está en la fuente.
+    """
+    sentences = re.split(r"(?<=[.!?])\s+", collapse_spaces(source_text or ""))
+    if not sentences:
+        return ""
+    scored: list[tuple[int, str]] = []
+    for s in sentences:
+        score = len(_numbers(s)) * 2 + len(_entities(s))
+        scored.append((score, s))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best = scored[0][1]
+    return trim_x(best, limit)
+
+
 @dataclass(frozen=True, slots=True)
 class Editorial:
     analysis: str
