@@ -36,9 +36,6 @@ class Settings:
     sources_file: Path
     timezone_name: str
     dashboard_hours: int
-    intraday_enabled: bool
-    intraday_interval_seconds: int
-    intraday_alert_cooldown_minutes: int
     news_max_age_hours: int
     ecuador_only: bool
     request_timeout_seconds: int
@@ -67,11 +64,6 @@ class Settings:
             sources_file=Path(os.getenv("FUELINTEL_SOURCES_FILE", "./config/sources.json")),
             timezone_name=os.getenv("FUELINTEL_TIMEZONE", "America/Guayaquil"),
             dashboard_hours=int(os.getenv("FUELINTEL_DASHBOARD_HOURS", "5")),
-            intraday_enabled=_bool("FUELINTEL_INTRADAY_ENABLED", True),
-            intraday_interval_seconds=max(60, int(os.getenv("FUELINTEL_INTRADAY_INTERVAL_SECONDS", "60"))),
-            intraday_alert_cooldown_minutes=max(
-                5, int(os.getenv("FUELINTEL_INTRADAY_ALERT_COOLDOWN_MINUTES", "30"))
-            ),
             news_max_age_hours=int(os.getenv("FUELINTEL_NEWS_MAX_AGE_HOURS", "36")),
             ecuador_only=_bool("FUELINTEL_ECUADOR_ONLY", True),
             request_timeout_seconds=int(os.getenv("FUELINTEL_REQUEST_TIMEOUT_SECONDS", "20")),
@@ -84,7 +76,7 @@ class Settings:
             supabase_service_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
             eia_api_key=os.getenv("EIA_API_KEY", ""),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
             chart_revision=os.getenv("FUELINTEL_CHART_REVISION", "1").strip() or "1",
         )
 

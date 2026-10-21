@@ -92,6 +92,36 @@ EXCLUSION_TERMS = {
 
 AMBIGUOUS_TERMS = {"extra", "super", "arch", "oil"}
 
+
+# Primary fuel-domain vocabulary for the HEADLINE. The operator's channel only
+# carries stories whose front page already talks fuel; a story whose grounding
+# only appears in the body smells like incidental mention and stays as context.
+PRIMARY_FUEL_TERMS = {
+    "gasolina", "gasolinas", "diesel", "ecopais", "crudo", "petroleo",
+    "refineria", "derivados", "combustible", "combustibles", "hidrocarburo",
+    "oleoducto", "brent", "wti", "opep", "hormuz", "ormuz", "gasolinera",
+    "banda de precios", "precio de la gasolina", "precios de la gasolina",
+    "precio de los combustibles", "precios de los combustibles",
+    "gas price", "gas prices", "gasoline", "crude oil", "fuel price", "fuel prices",
+    "oil price", "oil prices", "diesel fuel", "refining", "crude",
+}
+
+def has_primary_fuel_title(candidate: Candidate) -> bool:
+    """True when the headline itself belongs to the fuel domain."""
+    title = fold(candidate.title)
+    if any(term in title for term in PRIMARY_FUEL_TERMS):
+        return True
+    # Official national regulators may publish generic document titles while
+    # the payload carries the price structure; they never fail the title gate.
+    return (
+        candidate.source.country == "EC"
+        and candidate.source.trust >= 90
+        and any(
+            word in fold(f"{candidate.title} {candidate.summary} {candidate.body}")
+            for word in ("precio", "banda", "vigencia", "galon", "pvp", "derivados")
+        )
+    )
+
 # Ecuador-focused energy words. A local fuel or energy story matters to the
 # operator even before an official price is published, so the Ecuadorian
 # sources receive a small, explicit boost for them.
@@ -213,6 +243,16 @@ def evaluate_candidate(
 
     if score < 5:
         return Decision(VerificationStatus.REJECTED, 0, ("contenido no relacionado",), score)
+
+    # Headline gate: only fuel-domain headlines (or major supply events) reach
+    # the operator. Everything else stays in storage as context and never pages.
+    if not has_primary_fuel_title(candidate) and not is_high_impact_foreign(candidate):
+        return Decision(
+            VerificationStatus.REJECTED,
+            0,
+            ("el titular no es del dominio de combustibles: se conserva solo como contexto",),
+            score,
+        )
 
     if (
         ecuador_only

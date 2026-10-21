@@ -141,6 +141,117 @@ function fastAlarmKind(source, raw) {
   return "";
 }
 
+// ---- Lane 0: official price parser (no AI, no GitHub Actions) ----
+// The golden rule: a price-change alert never depends on the AI or on Actions.
+// These functions parse an official price page strictly; when the parser is
+// not confident, sending nothing is always the chosen failure mode.
+
+const PRICE_SOURCE_IDS = new Set(["arch-precios", "arch-biblioteca", "presidencia-decretos", "petroecuador-precios", "petroecuador-historico"]);
+
+const PRICE_PRODUCTS = [
+  { key: "extra", label: "Extra 85", pattern: /gasolina\s+extra(?:\s+85)?|extra(?:\s+85)\b/i },
+  { key: "ecopais", label: "Ecopaís 85", pattern: /ecopa[íi]s(?:\s+85)?\b/i },
+  { key: "super", label: "Súper 95", pattern: /gasolina\s+s[úu]per(?:\s+95)?|s[úu]per(?:\s+95)\b/i },
+  { key: "diesel", label: "Diésel Premium", pattern: /di[ée]sel(?:\s+(?:premium|2))?\b/i },
+];
+
+function plainHtmlText(html) {
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function priceValueAfter(text, from) {
+  // The price is the first $ amount within the next ~60 characters of the
+  // product label, so co-located rows in a real price structure are honored
+  // while distant navigation chatter is ignored.
+  const window = text.slice(from, from + 60);
+  const match = window.match(/\$\s*(\d{1,2}[.,]\d{2})\s*(?:por|\/)\s*gal/i) || window.match(/\$\s*(\d{1,2}[.,]\d{2})/);
+  return match ? Number(match[1].replace(",", ".")) : null;
+}
+
+function extractOfficialPrices(html) {
+  const text = plainHtmlText(html);
+  const prices = {};
+  for (const product of PRICE_PRODUCTS) {
+    const match = product.pattern.exec(text);
+    if (!match) continue;
+    const value = priceValueAfter(text, match.index + match[0].length);
+    if (value !== null && value >= 0.5 && value <= 10) prices[product.key] = value;
+  }
+  // A genuine Ecuadorian price structure lists the products together with one
+  // vigencia. Anything else (menu pages, feeds) is noise and never alerts.
+  if (!/precio|bandas|vigencia/i.test(text) || Object.keys(prices).length < 3) return null;
+  let vigencia = "";
+  const vigMatch = text.match(/vigencia[^:]{0,20}[:\s]+([^|.]{4,60})/i)
+    || text.match(/desde\s+(?:el\s+)?\d{1,2}\/\d{1,2}\/\d{4}(?:\s+al\s+\d{1,2}\/\d{1,2}\/\d{4})?/i);
+  if (vigMatch) vigencia = (vigMatch[1] ? vigMatch[1].trim() : vigMatch[0]).slice(0, 60);
+  return { prices, vigencia };
+}
+
+function priceDiff(previous, current) {
+  const labels = Object.fromEntries(PRICE_PRODUCTS.map((p) => [p.key, p.label]));
+  const changes = [];
+  for (const [key, value] of Object.entries(current)) {
+    const before = previous[key];
+    if (before === undefined) {
+      changes.push({ label: labels[key], from: null, to: value });
+    } else if (Math.round((value - before) * 100) !== 0) {
+      changes.push({ label: labels[key], from: before, to: value });
+    }
+  }
+  return changes;
+}
+
+function buildPriceFlash(diff, vigencia, sourceName) {
+  const lines = ["⚡ PRECIOS OFICIALES DE COMBUSTIBLES (Ecuador)"];
+  for (const change of diff) {
+    if (change.from === null) {
+      lines.push(`${change.label}: $${change.to.toFixed(2)}`);
+    } else {
+      const direction = change.to > change.from ? "▲" : "▼";
+      lines.push(`${change.label}: $${change.to.toFixed(2)} ${direction} (antes $${change.from.toFixed(2)})`);
+    }
+  }
+  if (vigencia) lines.push(`Vigencia: ${vigencia}`);
+  lines.push(`Fuente: ${sourceName} · publicación oficial.`);
+  return lines.join("\n");
+}
+
+async function handlePriceFlash(env, source, body, detectedAt) {
+  const parsed = extractOfficialPrices(body);
+  if (!parsed) return; // unparseable page: no flash (better late than wrong)
+  const previous = await env.DB.prepare("SELECT prices_json FROM price_cache WHERE source_id = ?")
+    .bind(source.id).first().catch(() => null);
+  const unchanged = previous && previous.prices_json === JSON.stringify(parsed.prices);
+  if (!unchanged) {
+    const changes = priceDiff(previous ? JSON.parse(previous.prices_json) : {}, parsed.prices);
+    if (previous && changes.length && env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
+      const message = buildPriceFlash(changes, parsed.vigencia, source.name);
+      try {
+        const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          signal: AbortSignal.timeout(8000),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: message })
+        });
+        if (response.ok) await response.json();
+      } catch { /* transient network error: the cache row below is not yet updated, so the next poll retries */ }
+    }
+  }
+  await env.DB.prepare(
+    `INSERT INTO price_cache(source_id, prices_json, vigencia, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(source_id) DO UPDATE SET prices_json=excluded.prices_json, vigencia=excluded.vigencia, updated_at=excluded.updated_at`
+  ).bind(source.id, JSON.stringify(parsed.prices), parsed.vigencia, detectedAt).run().catch(() => {});
+}
+
 function escapeHtml(value = "") {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -264,8 +375,8 @@ async function sha256(value) {
 }
 
 const SOURCES = [
-  { id: "arch-precios", name: "ARCH - Precios de derivados", url: "https://controlhidrocarburos.gob.ec/precios-gasolinas-extra-y-ecopais/", kind: "html", trust: 100, pollSeconds: 60, critical: true },
-  { id: "arch-biblioteca", name: "ARCH - Biblioteca y resoluciones", url: "https://controlhidrocarburos.gob.ec/biblioteca/", kind: "links", trust: 100, pollSeconds: 120, critical: true },
+  // ARCH (HTTP 403) y Google News Ecuador (HTTP 503) rechazan las IP de
+  // Cloudflare: se vigilan en GitHub Actions vía fuelintel.radar, no aquí.
   { id: "presidencia-decretos", name: "Presidencia - Decretos", url: "https://minka.presidencia.gob.ec/portal/usuarios_externos.jsf?wpmobileexternal=true", kind: "html", trust: 100, pollSeconds: 120, critical: false },
   { id: "bce-petroleo", name: "BCE - Estadísticas petroleras", url: "https://contenido.bce.fin.ec/?bcedata_grid_app=1", kind: "html", trust: 100, pollSeconds: 1800 },
   { id: "petroecuador-precios", name: "EP Petroecuador - Estructuras de precios", url: "https://www.eppetroecuador.ec/?s=estructura+de+precios", kind: "links", trust: 100, pollSeconds: 60, critical: true },
@@ -286,15 +397,10 @@ const SOURCES = [
   { id: "eia-weekly-petroleum", name: "EIA - Weekly Petroleum Status Report", url: "https://www.eia.gov/petroleum/supply/weekly/", kind: "html", trust: 100, pollSeconds: 300 }
   ,{ id: "telegram-aja-news", name: "Al Jazeera Arabic — Telegram oficial", url: "https://t.me/s/AjaNews", kind: "telegram", trust: 85, pollSeconds: 60 }
   ,{ id: "telegram-walter-bloomberg", name: "Walter Bloomberg — Telegram (agregador)", url: "https://t.me/s/WalterBloomberg", kind: "telegram", trust: 82, pollSeconds: 60 }
-  ,{ id: "google-news-ecuador-combustibles", name: "Google News — combustibles Ecuador (agregador)", url: "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20Petroecuador%29%20Ecuador&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60 }
   ,{ id: "elcomercio-rss", name: "El Comercio — RSS general", url: "https://www.elcomercio.com/feed/", kind: "rss", trust: 75, pollSeconds: 60 }
   ,{ id: "expreso-economia", name: "Expreso — Economía y negocios", url: "https://www.expreso.ec/economia-y-negocios/", kind: "links", trust: 75, pollSeconds: 60 }
-  ,{ id: "lahora-economia", name: "Google News — La Hora combustibles", url: "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20petroleo%29%20site%3Alahora.com.ec&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60 }
   ,{ id: "teleamazonas-economia", name: "Teleamazonas — Economía", url: "https://imagenes.teleamazonas.com/actualidad/noticias/economia/", kind: "links", trust: 72, pollSeconds: 60 }
-  ,{ id: "eltelegrafo-economia", name: "Google News — El Telégrafo combustibles", url: "https://news.google.com/rss/search?q=%28gasolina%20OR%20diesel%20OR%20combustible%20OR%20petroleo%29%20site%3Aeltelegrafo.com.ec&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60 }
   ,{ id: "ukmto-maritime-security", name: "UKMTO — avisos oficiales de seguridad marítima", url: "https://www.ukmto.org/ukmto-products", kind: "links", trust: 95, pollSeconds: 300 }
-  ,{ id: "google-news-ecuador-presidente", name: "Google News — presidente y combustibles (agregador)", url: "https://news.google.com/rss/search?q=%28Noboa%20OR%20presidente%20OR%20%22ministerio%20de%20energ%C3%ADa%22%20OR%20Petroecuador%29%20%28gasolina%20OR%20di%C3%A9sel%20OR%20combustible%20OR%20subsidio%29&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60, critical: true }
-  ,{ id: "google-news-ecuador-precios", name: "Google News — cambio de precio de combustibles Ecuador (agregador)", url: "https://news.google.com/rss/search?q=%28precio%20OR%20precios%20OR%20sube%20OR%20baja%20OR%20alza%20OR%20rebaja%20OR%20%22nuevo%20precio%22%29%20%28gasolina%20OR%20di%C3%A9sel%20OR%20combustible%20OR%20extra%20OR%20ecopa%C3%ADs%29%20Ecuador&hl=es-419&gl=EC&ceid=EC:es-419", kind: "rss", trust: 72, pollSeconds: 60, critical: true }
 ];
 
 const USER_AGENT = "FuelIntelligenceEcuador/0.2 (+verified private monitor)";
@@ -470,6 +576,9 @@ async function pollSource(env, source, state, detectedAt) {
     // next successful request in baseline mode so old articles are never sent.
     const bootstrap = !state?.body_hash;
     if (state?.body_hash !== bodyHash) {
+      // Lane 0: an official price page whose bytes changed is parsed in place,
+      // with no AI and no Actions round-trip.
+      if (PRICE_SOURCE_IDS.has(source.id)) await handlePriceFlash(env, source, body, detectedAt);
       const candidates = discover(source, body, response.url || source.url);
       if (source.kind !== "html" && candidates.length === 0) {
         // A response that is not a feed at all (HTML challenge page, consent
@@ -522,6 +631,13 @@ async function pollSource(env, source, state, detectedAt) {
 async function pollAll(env) {
   const detectedAt = new Date().toISOString();
   const nowMs = Date.parse(detectedAt);
+  // Lane 0 storage: the parsed official price map per source. One idempotent
+  // DDL per cycle is cheaper than a migration step and keeps boot self-contained.
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS price_cache (
+       source_id TEXT PRIMARY KEY, prices_json TEXT NOT NULL,
+       vigencia TEXT, updated_at TEXT NOT NULL)`
+  ).run().catch(() => {});
   const states = await env.DB.prepare("SELECT * FROM source_state").all();
   const byId = new Map((states.results || []).map((state) => [state.source_id, state]));
   const due = SOURCES.filter((source) => {

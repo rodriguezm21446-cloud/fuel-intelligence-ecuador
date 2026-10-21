@@ -78,5 +78,42 @@ class NoiseGateTests(unittest.TestCase):
         self.assertNotEqual(decision.status, VerificationStatus.REJECTED)
 
 
+class HeadlineGateTests(unittest.TestCase):
+    def test_domestic_story_without_fuel_headline_never_reaches_the_operator(self):
+        decision = evaluate_candidate(
+            _candidate("Presidente inaugura hospital en Quito", EC), NOW, ecuador_only=True
+        )
+        self.assertEqual(decision.status, VerificationStatus.REJECTED)
+
+    def test_relevant_domestic_story_without_fuel_headline_uses_the_title_gate(self):
+        decision = evaluate_candidate(
+            _candidate("Importación de fertilizantes crece en Ecuador", EC), NOW
+        )
+        self.assertEqual(decision.status, VerificationStatus.REJECTED)
+        self.assertIn("titular no es del dominio de combustibles", " ".join(decision.reasons))
+
+    def test_incidental_fuel_word_in_body_is_not_enough(self):
+        decision = evaluate_candidate(
+            _candidate("Cambian taxistas y rutas del transporte urbano en Quito", EC), NOW
+        )
+        self.assertEqual(decision.status, VerificationStatus.REJECTED)
+
+    def test_official_fuel_source_exceeds_the_headline_gate(self):
+        official = SourceSpec(
+            id="arch-precios", name="ARCH", url="https://example.test/arch",
+            kind="html", trust=100, country="EC", max_age_hours=24,
+        )
+        candidate = Candidate(
+            source=official,
+            title="Comunicado número 12",
+            url="https://example.test/c",
+            published_at=NOW - timedelta(hours=1),
+            detected_at=NOW - timedelta(minutes=50),
+            content_hash="doc-12",
+        )
+        decision = evaluate_candidate(candidate, NOW)
+        self.assertNotIn("titular no es del dominio de combustibles", " ".join(decision.reasons))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -30,13 +31,16 @@ ANALYST_CONTRACT = (
             "con la evidencia, en particular cuándo y cuánto cambiará el precio oficial en Ecuador."
     )
 
-# The summary is the message the operator reads first: one short Spanish block
-# (≤400 characters) with the necessary data, never a paraphrase without figures.
+# The summary is the message the operator reads first: a short Spanish flash
+# (≤400 characters, up to three lines) with the necessary data, never a
+# paraphrase without figures. Line breaks stay so the flash is readable.
 SUMMARY_CONTRACT = (
-    "Además, en 'summary' escribe un resumen en español de máximo 400 caracteres con la data "
-    "necesaria: qué pasó, las cifras clave y el canal hacia Ecuador. Sin relleno, sin repetir la "
-    "frase de la fuente y sin inventar datos que no estén en la evidencia. Si es una noticia "
-    "internacional, escribe en español claro para un lector ecuatoriano."
+    "Además, en 'summary' escribe un flash en español de máximo 400 caracteres con hasta tres líneas, "
+    "al estilo de un tiquete de mercado: línea 1 con EL HECHO en mayúsculas exprimido del titular de la "
+    "fuente (misma sustancia, no una interpretación), línea 2 con las cifras exactas (unidad y vigencia) "
+    "copiadas de la evidencia, línea 3 con el canal hacia Ecuador solo si la evidencia lo respalda. "
+    "Prohibido: opinión, contexto narrativo sin cifras, mencionar una cifra que no esté en la evidencia. "
+    "Si la conexión con Ecuador es débil, omite la línea 3 en lugar de inventarla."
 )
 
 
@@ -95,8 +99,12 @@ class GeminiEditor:
 
     def __init__(self, api_key: str, model: str, timeout_seconds: int = 60):
         self.api_key = api_key.strip()
-        selected = model.strip() or "gemini-3.5-flash-lite"
-        self.model = selected if selected.replace("-", "").replace(".", "").isalnum() else "gemini-3.5-flash-lite"
+        # The editorial run needs writing quality: default to the full flash
+        # tier rather than the smallest -lite model. FUELINTEL_GEMINI_MODEL /
+        # GEMINI_MODEL overrides remain fully honored.
+        fallback = os.getenv("FUELINTEL_GEMINI_MODEL", "").strip()
+        selected = model.strip() or fallback or "gemini-3.5-flash"
+        self.model = selected if selected.replace("-", "").replace(".", "").isalnum() else "gemini-3.5-flash"
         self.timeout_seconds = timeout_seconds
         self.last_error = ""
 
@@ -135,7 +143,10 @@ class GeminiEditor:
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 1000,
+                # Four editorial fields exceed 2000 characters in Spanish; the
+                # old budget of 1000 tokens truncated the JSON mid-field and
+                # silently discarded every editorial.
+                "maxOutputTokens": 3000,
                 "responseMimeType": "application/json",
                 "responseSchema": schema,
             },
@@ -158,7 +169,9 @@ class GeminiEditor:
             analysis = tidy_lines(str(parsed.get("analysis", "")))[:1100].strip()
             x_text = trim_x(collapse_spaces(str(parsed.get("x_text", ""))), 280)
             doubts = collapse_spaces(str(parsed.get("doubts", "")))[:300].strip()
-            summary = collapse_spaces(str(parsed.get("summary", "")))[:400].strip() or x_text
+            # Keep the flash's line structure for readability; tighten runs of
+            # spaces inside each line only. Hard cap stays at 400 characters.
+            summary = tidy_lines(str(parsed.get("summary", "")))[:400].strip() or x_text
             if not analysis or not x_text:
                 self.last_error = "Gemini devolvió campos editoriales vacíos"
                 return None

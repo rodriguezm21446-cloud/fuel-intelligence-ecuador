@@ -12,7 +12,6 @@ from datetime import datetime, timedelta, timezone
 from .ai import GeminiEditor
 from .charts import generate_dashboard, generate_historical_dashboard, national_data_signature
 from .market_intelligence import build_market_payload, generate_event_market_chart, generate_market_bundle, load_market_series
-from .intraday import IntradayMonitor
 from .config import Settings, load_sources
 from .pipeline import Pipeline
 from .sources import HttpClient, SourcePoller
@@ -231,21 +230,6 @@ def historical_dashboard(settings: Settings) -> int:
     return 0 if notifier.send_photo(generated, f"Histórico de combustibles · {now_local:%d/%m/%Y %H:%M} · hora de Ecuador (UTC−5)") else 1
 
 
-def interactive_market(settings: Settings) -> int:
-    """Exporta un workspace bqplot local; no envía ni publica nada."""
-    from .bqplot_charts import export_bqplot_html
-
-    rows = load_market_series()
-    payload = build_market_payload({key: value for key, value in rows.items() if key in {"WTI", "Brent"}})
-    if payload is None:
-        LOG.warning("no hay datos verificables para el workspace interactivo")
-        return 2
-    now_local = datetime.now(timezone.utc).astimezone(settings.timezone)
-    destination = settings.data_dir / "interactive" / f"market-{now_local:%Y%m%d-%H%M}.html"
-    print(export_bqplot_html(payload, destination).resolve())
-    return 0
-
-
 def health(settings: Settings) -> int:
     store, _, _, _ = build_runtime(settings)
     latest_ai = store.latest_ai_run()
@@ -259,8 +243,7 @@ def health(settings: Settings) -> int:
         latest_tick = db.execute("SELECT MAX(observed_at) AS latest FROM market_ticks").fetchone()["latest"]
     print(
         f"items={items} prices={prices} market_ticks={ticks} latest_market_tick={latest_tick or '-'} "
-        f"sources={len(sources)} dry_run={settings.dry_run} intraday_enabled={settings.intraday_enabled} "
-        f"intraday_interval_seconds={settings.intraday_interval_seconds}"
+        f"sources={len(sources)} dry_run={settings.dry_run}"
     )
     if not settings.gemini_api_key:
         print("gemini=not_configured editorial_fallback=deterministic")
@@ -312,36 +295,6 @@ def run_forever(settings: Settings) -> int:
         threading.Thread(target=source_worker, args=(source,), name=f"source-{source.id}", daemon=True)
         for source in sources
     ]
-    if settings.intraday_enabled:
-        intraday = IntradayMonitor(
-            store,
-            notifier,
-            settings.data_dir,
-            cooldown_minutes=settings.intraday_alert_cooldown_minutes,
-        )
-
-        def intraday_worker() -> None:
-            failures = 0
-            while not stop_event.is_set():
-                started = time.monotonic()
-                try:
-                    emitted = intraday.scan(datetime.now(timezone.utc))
-                    failures = 0
-                    if emitted:
-                        LOG.info("intraday_alerts=%d", emitted)
-                except Exception as error:
-                    failures += 1
-                    store.record_pipeline_stage(
-                        "WF_08_ERROR_MONITOR",
-                        "intraday_error",
-                        f"{type(error).__name__}: {error}",
-                    )
-                    LOG.exception("falló la vigilancia intradía de Yahoo Finance")
-                base = settings.intraday_interval_seconds
-                interval = min(900, base * (2 ** min(failures, 4)))
-                stop_event.wait(max(1.0, interval - (time.monotonic() - started)))
-
-        workers.append(threading.Thread(target=intraday_worker, name="market-intraday", daemon=True))
     for worker in workers:
         worker.start()
 
@@ -390,7 +343,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     mode.add_argument("--once", action="store_true", help="revisa todas las fuentes una sola vez")
     mode.add_argument("--dashboard", action="store_true", help="genera y envía el gráfico nacional")
     mode.add_argument("--historical-dashboard", action="store_true", help="genera el histórico completo bajo demanda")
-    mode.add_argument("--interactive-market", action="store_true", help="exporta un gráfico bqplot interactivo a HTML")
     mode.add_argument("--health", action="store_true", help="muestra salud y errores de fuentes")
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
@@ -409,8 +361,6 @@ def main(argv: list[str] | None = None) -> int:
         return dashboard(settings)
     if args.historical_dashboard:
         return historical_dashboard(settings)
-    if args.interactive_market:
-        return interactive_market(settings)
     if args.health:
         return health(settings)
     return run_forever(settings)

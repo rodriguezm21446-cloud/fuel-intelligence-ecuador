@@ -1,0 +1,75 @@
+name: Fuel Intelligence Radar EC
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Cadencia práctica mínima de Actions. Cubre los anuncios del día 12
+    # sin sobrecargar; las fuentes aquí son las que Cloudflare no puede leer.
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuelintel-radar
+  cancel-in-progress: true
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FUELINTEL_DATA_DIR: data/runtime
+      FUELINTEL_TIMEZONE: America/Guayaquil
+      FUELINTEL_DRY_RUN: "false"
+      FUELINTEL_TELEGRAM_ENABLED: "true"
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-3.5-flash
+      FUELINTEL_BRAND_NAME: "@combustibleEc"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restore analysis memory
+        uses: actions/cache/restore@v4
+        with:
+          path: data/runtime
+          key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuelintel-state-
+
+      - name: Install verified dependencies
+        run: python -m pip install --disable-pip-version-check .
+
+      - name: Run blocked-source radar
+        run: python -m fuelintel.radar
+
+      - name: Save analysis memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/runtime
+          key: fuelintel-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Notify operator when radar fails
+        if: failure()
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os
+          from fuelintel.telegram import TelegramNotifier
+          notifier = TelegramNotifier(os.getenv("TELEGRAM_BOT_TOKEN", ""), os.getenv("TELEGRAM_CHAT_ID", ""), True, False)
+          try:
+              notifier.send_text("Aviso técnico de combustibleEc: falló el radar de fuentes bloqueadas (ARCH/Google News). El resto del sistema sigue.\n" + os.environ["RUN_URL"])
+          except Exception:
+              print("No se pudo entregar el aviso técnico por Telegram.")
+          PY

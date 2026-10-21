@@ -7,7 +7,7 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
 const context = vm.createContext({ URL, Intl, AbortSignal, TextEncoder });
 vm.runInContext(source.replace("export default {", "const worker = {") +
-  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,fastAlarmKind,isHighImpactForeign,SOURCES};", context);
+  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,fastAlarmKind,isHighImpactForeign,SOURCES,extractOfficialPrices,priceDiff,buildPriceFlash};", context);
 const api = context.api;
 
 test("el detector distingue publicación reciente, antigua, futura y sin fecha", () => {
@@ -103,10 +103,12 @@ test("solo el alto impacto internacional se despacha al lane de Python", () => {
   assert.equal(api.isHighImpactForeign({ title: "Analysis: oil market outlook", summary: "" }), false);
 });
 
-test("las fuentes del squawk local están registradas como críticas", () => {
+test("las fuentes bloqueadas por Cloudflare ya no se sondean desde el Worker", () => {
   const ids = new Set(api.SOURCES.map((source) => source.id));
-  for (const id of ["google-news-ecuador-presidente", "google-news-ecuador-precios", "google-news-ecuador-combustibles"]) {
-    assert.ok(ids.has(id), `falta la fuente ${id}`);
+  // ARCH (403) y Google News Ecuador (503) se vigilan en GitHub Actions
+  // vía fuelintel.radar; el Worker no debe gastar subrequests en ellas.
+  for (const id of ["arch-precios", "arch-biblioteca", "google-news-ecuador-presidente", "google-news-ecuador-precios", "google-news-ecuador-combustibles", "lahora-economia", "eltelegrafo-economia"]) {
+    assert.ok(!ids.has(id), `la fuente ${id} debe vivir en el radar de Actions, no en el Worker`);
   }
 });
 
@@ -122,4 +124,39 @@ test("X no consulta ni genera gasto sin activación explícita", async () => {
   context.fetch = () => { throw new Error("No debe consultar"); };
   await api.pollX({X_BEARER_TOKEN: "fake"}, "2026-09-13T18:00:00Z");
   await api.pollX({FUELINTEL_X_ENABLED: "true"}, "2026-09-13T18:00:00Z");
+});
+
+// ---- Lane 0: parser estricto de precios oficiales ----
+
+test("extrae los 4 productos, la vigencia y exige confianza mínima", () => {
+  const html = `
+    <html><body>
+      <h1>Bandas de precios de gasolina</h1>
+      <table><tr><td>Gasolina Extra 85</td><td>$3.17 por galón desde el 12 de octubre</td></tr>
+      <tr><td>Ecopaís 85</td><td>$3.17</td></tr>
+      <tr><td>Gasolina Súper 95</td><td>$5.42</td></tr>
+      <tr><td>Diésel Premium 2</td><td>$3.11</td></tr></table>
+      <p>Vigencia: del 12 de octubre al 11 de noviembre de 2026.</p>
+    </body></html>`;
+  const parsed = JSON.parse(JSON.stringify(api.extractOfficialPrices(html)));
+  assert.deepEqual(parsed.prices, {extra: 3.17, ecopais: 3.17, super: 5.42, diesel: 3.11});
+  assert.match(parsed.vigencia, /12 de octubre/);
+  // Página sin estructura real: el parser se niega y no hay flash.
+  assert.equal(api.extractOfficialPrices("<html><body>Menú de navegación Extra frente al mar</body></html>"), null);
+});
+
+test("priceDiff marca solo centavo real y envía atribución fiel", () => {
+  const previous = {extra: 3.21, ecopais: 3.21, super: 5.42, diesel: 3.15};
+  const current = {extra: 3.17, ecopais: 3.17, super: 5.42, diesel: 3.11};
+  const diff = JSON.parse(JSON.stringify(api.priceDiff(previous, current)));
+  assert.deepEqual(diff.map(c => `${c.label}: $${c.from}→$${c.to}`),
+    ["Extra 85: $3.21→$3.17", "Ecopaís 85: $3.21→$3.17", "Diésel Premium: $3.15→$3.11"]);
+  const flash = api.buildPriceFlash(diff, "12 de octubre al 11 de noviembre de 2026", "EP Petroecuador - Estructuras de precios");
+  assert.match(flash, /PRECIOS OFICIALES DE COMBUSTIBLES/);
+  assert.match(flash, /Extra 85: \$3\.17 ▼ \(antes \$3\.21\)/);
+  assert.match(flash, /Vigencia: 12 de octubre al 11 de noviembre de 2026/);
+  assert.match(flash, /Fuente: EP Petroecuador/);
+  // Nunca inventa el precio anterior si es la primera observación del parser.
+  const first = api.buildPriceFlash([{label: "Extra 85", from: null, to: 3.17}], "", "ARCH");
+  assert.ok(!first.includes("antes"));
 });

@@ -65,7 +65,7 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_MODEL: gemini-3.5-flash-lite
+      GEMINI_MODEL: gemini-3.5-flash
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       FUELINTEL_CHART_REVISION: "8"
@@ -123,7 +123,7 @@ jobs:
 
           editor = GeminiEditor(
               os.environ.get("GEMINI_API_KEY", ""),
-              os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+              os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
               timeout_seconds=90,
           )
           result = editor.review(
@@ -139,13 +139,17 @@ jobs:
         if: github.event_name == 'push'
         run: |
           python - <<'PY'
+          import os
           from pathlib import Path
           from fuelintel.market_intelligence import generate_market_chart
 
-          chart = generate_market_chart(Path("data/runtime/charts/market-test.png"))
-          if chart is None:
-              raise SystemExit("El proveedor de mercado no entregó una serie verificable")
-          print("Gráfico de mercado validado sin enviar mensajes de prueba a Telegram:", chart)
+          if not os.getenv("EIA_API_KEY", "").strip():
+              print("EIA_API_KEY no configurada: se omite la validación del gráfico de mercado (sin datos, sin gráfico)")
+          else:
+              chart = generate_market_chart(Path("data/runtime/charts/market-test.png"))
+              if chart is None:
+                  raise SystemExit("El proveedor de mercado no entregó una serie verificable")
+              print("Gráfico de mercado validado sin enviar mensajes de prueba a Telegram:", chart)
           PY
 
       - name: Save analysis memory

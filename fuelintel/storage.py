@@ -437,7 +437,7 @@ class Store:
             db.execute(
                 """
                 INSERT INTO market_ticks(symbol, series, observed_at, price, volume, source, received_at)
-                VALUES (?, ?, ?, ?, ?, 'Yahoo Finance via yfinance', ?)
+                VALUES (?, ?, ?, ?, ?, 'EIA API', ?)
                 ON CONFLICT(symbol, observed_at) DO UPDATE SET
                     price=excluded.price, volume=excluded.volume, received_at=excluded.received_at
                 """,

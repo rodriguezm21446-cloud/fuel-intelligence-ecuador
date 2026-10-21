@@ -36,11 +36,14 @@ RETAIL_COLORS = {
     "Gasolina premium": "#D8D5CE",
     "Diésel": "#6C8FB3",
 }
-SYMBOLS = {
-    "WTI": ("CL=F",),
-    "Brent": ("BZ=F",),
-    "RBOB": ("RB=F",),
-    "ULSD": ("HO=F",),
+# Cotizaciones oficiales de spot (EIA, API legacy v1). Nada de agregadores
+# privados: las series son las mismas que publica eia.gov y pasan por las
+# bandas sane de knowledge.py antes de dibujarse.
+EIA_SPOT_SERIES = {
+    "WTI": "PET.RWTC.D",          # Cushing OK WTI Spot (USD/barril, diario)
+    "Brent": "PET.RBRTE.D",       # Europe Brent Spot FOB (USD/barril, diario)
+    "RBOB": "EER_EPMR_PI_Y35NY_DPG.D",      # NY Harbor gasolina regular spot (USD/gal)
+    "ULSD": "EER_EPD2DXL0_PF4_Y35NY_DPG.D", # NY Harbor diésel ULSD spot (USD/gal)
 }
 
 
@@ -56,28 +59,38 @@ class MarketEstimate:
     reason: str
 
 
-def _history(symbol: str, days: int = 240) -> list[tuple[str, float]]:
-    """Read delayed exchange closes directly; never relabel them as real time."""
-    import yfinance as yf
+def _history(series_id: str) -> list[tuple[str, float]]:
+    """Read official daily spot closes from the EIA API (legacy v1 route).
 
-    local_today = datetime.now(timezone.utc).astimezone(ECUADOR_TZ).date()
-    start = (local_today - timedelta(days=days)).isoformat()
-    cache_dir = Path(os.getenv("FUELINTEL_DATA_DIR", "data/runtime")) / "yfinance-cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    yf.set_tz_cache_location(str(cache_dir))
-    frame = yf.Ticker(symbol).history(start=start, auto_adjust=False).reset_index()
-    by_date: dict[str, float] = {}
-    for _, row in frame.iterrows():
-        when = row.get("Date", row.iloc[0])
-        close = row.get("Close")
-        if close is None:
+    Returns only observed dates with a finite value; the caller still runs the
+    series through validate_market_series and the knowledge sanity bands, so a
+    wrong series or a provider outage yields nothing rather than a guess.
+    """
+    import urllib.parse
+    import urllib.request
+
+    api_key = os.getenv("EIA_API_KEY", "").strip()
+    if not api_key:
+        return []
+    url = "https://api.eia.gov/series/?" + urllib.parse.urlencode({
+        "api_key": api_key,
+        "series_id": series_id,
+    })
+    request = urllib.request.Request(url, headers={"User-Agent": "FuelIntelligenceEcuador/0.4"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    rows: list[tuple[str, float]] = []
+    for entry in payload.get("series", [{}])[0].get("data", []):
+        if not isinstance(entry, (list, tuple)) or len(entry) < 2:
             continue
-        day, value = str(when)[:10], float(close)
-        # Yahoo can expose the still-open futures session as a daily row.  A
-        # partial bar must never be described as a close, so today is excluded.
-        if day < local_today.isoformat() and math.isfinite(value) and 0 < value < 1000:
-            by_date[day] = value
-    return sorted(by_date.items())
+        day, raw_value = str(entry[0]), entry[1]
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if len(day) == 8 and math.isfinite(value) and value > 0:
+            rows.append((f"{day[:4]}-{day[4:6]}-{day[6:8]}", value))
+    return sorted(set(rows))
 
 
 def _weekly_closes(rows: list[tuple[str, float]]) -> list[tuple[str, float]]:
@@ -737,16 +750,14 @@ def build_market_briefing(raw_series: dict[str, list[tuple[str, float]]], relate
 
 def load_market_series() -> dict[str, list[tuple[str, float]]]:
     raw_series: dict[str, list[tuple[str, float]]] = {}
-    for name, symbols in SYMBOLS.items():
-        for symbol in symbols:
-            try:
-                rows = _history(symbol)
-                validate_market_series(name, rows)
-                if _plausible_market_series(name, rows):
-                    raw_series[name] = rows
-                    break
-            except Exception:
-                continue
+    for name, series_id in EIA_SPOT_SERIES.items():
+        try:
+            rows = _history(series_id)
+            validate_market_series(name, rows)
+            if _plausible_market_series(name, rows):
+                raw_series[name] = rows
+        except Exception:
+            continue
     return raw_series
 
 

@@ -43,6 +43,40 @@ class GeminiTests(unittest.TestCase):
         self.assertFalse(editor.enabled)
         self.assertIsNone(editor.review("evidence", "safe draft"))
 
+    def test_default_model_is_the_full_flash_tier(self):
+        editor = GeminiEditor("secret", "")
+        self.assertEqual(editor.model, "gemini-3.5-flash")
+
+    def test_environment_model_override_is_honored(self):
+        import os
+        saved = os.environ.get("FUELINTEL_GEMINI_MODEL")
+        try:
+            os.environ["FUELINTEL_GEMINI_MODEL"] = "gemini-3.5-pro"
+            editor = GeminiEditor("secret", "")
+            self.assertEqual(editor.model, "gemini-3.5-pro")
+        finally:
+            if saved is None:
+                os.environ.pop("FUELINTEL_GEMINI_MODEL", None)
+            else:
+                os.environ["FUELINTEL_GEMINI_MODEL"] = saved
+
+    @patch("fuelintel.ai.urllib.request.urlopen")
+    def test_summary_keeps_the_flash_line_structure(self, mocked):
+        content = json.dumps({
+            "analysis": "Hecho: ARCH publicó la rebaja.",
+            "x_text": "Bajó la gasolina.",
+            "summary": "PRIMERA LÍNEA DEL HECHO\nCifra: $3.17 por galón\nCanal: bandas",
+            "doubts": "",
+        })
+        mocked.return_value = io.BytesIO(json.dumps({
+            "candidates": [{"content": {"parts": [{"text": content}]}}]
+        }).encode("utf-8"))
+        editor = GeminiEditor("secret", "gemini-3.5-flash")
+        editorial = editor.review("El precio baja: $3.17.", "Bajó la gasolina.")
+        self.assertIsNotNone(editorial)
+        self.assertIn("PRIMERA LÍNEA DEL HECHO\nCifra: $3.17", editorial.summary)
+        self.assertLessEqual(len(editorial.summary), 400)
+
     @patch("fuelintel.ai.urllib.request.urlopen")
     def test_timeout_falls_back_without_blocking(self, mocked):
         mocked.side_effect = TimeoutError()
