@@ -89,15 +89,7 @@ python -m playwright install chromium
 
 `python -m fuelintel.main --dashboard` revisa el gráfico nacional de los últimos cuatro periodos y los gráficos de mercado. GitHub lo ejecuta cinco veces al día (00:17, 05:17, 10:17, 15:17 y 20:17 UTC), pero Telegram recibe una imagen únicamente cuando cambia la evidencia verificada. La vista se escoge según la noticia verificada o la anomalía medida, sin cambiar el tipo de gráfico solo por decoración. La encuesta semanal de la EIA usa su propio gráfico y firma. `python -m fuelintel.main --historical-dashboard` genera el histórico nacional completo solo cuando el operador lo solicita.
 
-`python -m fuelintel.main --interactive-market` exporta un HTML bqplot local para exploración. No publica ni envía nada. bqplot es el visor interactivo; no es proveedor de datos ni sustituye las validaciones. Una marca de hora indica cuándo se verificó la información, pero nunca convierte un cierre diferido o una publicación semanal en dato en tiempo real.
-
-La vigilancia intradía se configura con `FUELINTEL_INTRADAY_ENABLED`,
-`FUELINTEL_INTRADAY_INTERVAL_SECONDS` y
-`FUELINTEL_INTRADAY_ALERT_COOLDOWN_MINUTES`. El intervalo mínimo permitido es
-60 segundos. Yahoo Finance puede retrasar o revisar cotizaciones; por eso cada
-alerta conserva la hora de observación y la hora de verificación. `yfinance` y
-los datos de Yahoo son adecuados para investigación personal, no sustituyen un
-feed bursátil con licencia para vender una terminal institucional.
+El monitor de mercado no usa agregadores privados: las series vienen de la EIA por dos vías — la API oficial (con `EIA_API_KEY`) o, sin key, los históricos oficiales .xls de eia.gov/dnav (mismo EIA, archivos de ~0.5 MB). Si ambas vías fallan, se dibuja el último snapshot validado en `FUELINTEL_DATA_DIR/market_snapshot.json`; una serie sin ninguna fuente disponible queda fuera del gráfico en lugar de inventarse. Cada gráfico conserva la marca de hora de verificación, pero un cierre diario oficial nunca se presenta como dato en tiempo real. La vigilancia intradía de terminal institucional no se implementó a propósito: un feed bursátil con licencia vendedor de latencia millonaria no es sustituible por datos gratuitos.
 
 El seguimiento AIS de posiciones de barcos no se activa sin una clave del proveedor y un proceso persistente. UKMTO sí funciona como vigilancia oficial de incidentes. Una anomalía estadística despierta una revisión, pero nunca se publica como causa o pronóstico por sí sola.
 

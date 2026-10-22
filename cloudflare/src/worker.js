@@ -390,7 +390,6 @@ const SOURCES = [
   { id: "oilprice-main-rss", name: "OilPrice.com - Energy RSS", url: "https://oilprice.com/rss/main", kind: "rss", trust: 78, pollSeconds: 60 },
   { id: "cbs-moneywatch-rss", name: "CBS News - MoneyWatch RSS", url: "https://www.cbsnews.com/latest/rss/moneywatch", kind: "rss", trust: 82, pollSeconds: 60 },
   { id: "nyt-energy-rss", name: "The New York Times - Energy and Environment RSS", url: "https://rss.nytimes.com/services/xml/rss/nyt/EnergyEnvironment.xml", kind: "rss", trust: 82, pollSeconds: 120 },
-  { id: "yahoo-finance-energy-rss", name: "Google News - Yahoo Finance energía (agregador)", url: "https://news.google.com/rss/search?q=%28oil%20OR%20crude%20OR%20gasoline%20OR%20diesel%20OR%20refinery%20OR%20OPEC%29%20site%3Afinance.yahoo.com&hl=en-US&gl=US&ceid=US%3Aen", kind: "rss", trust: 72, pollSeconds: 60 },
   { id: "doe-energy-news", name: "U.S. Department of Energy - Energy News", url: "https://www.energy.gov/listings/energy-news?view=rss", kind: "links", trust: 100, pollSeconds: 300 },
   { id: "eia-today-energy-rss", name: "EIA - Today in Energy RSS", url: "https://www.eia.gov/rss/todayinenergy.xml", kind: "rss", trust: 100, pollSeconds: 300 },
   { id: "eia-gasoline-diesel-rss", name: "EIA - Gasoline and Diesel Fuel Update RSS", url: "https://www.eia.gov/petroleum/gasdiesel/includes/gas_diesel_rss.xml", kind: "rss", trust: 100, pollSeconds: 300 },

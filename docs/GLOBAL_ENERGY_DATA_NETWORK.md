@@ -270,9 +270,10 @@ AIS — ambos sentidos” y mostrar claramente `último día disponible`, nunca
 - ubicación y carga en tiempo real de cada petrolero.
 
 ICE exige aprobación incluso para mostrar públicamente datos retrasados, y CME
-cobra la API de producción más las licencias aplicables. Yahoo Finance/yfinance
-puede servir como respaldo de investigación, pero es no oficial y sus datos no
-deben constituir la base redistribuida de un producto comercial.
+cobra la API de producción más las licencias aplicables. Los agregadores privados
+solo sirven como respaldo de investigación, pero son no oficiales y sus datos no
+deben constituir la base redistribuida de un producto comercial; las series
+vienen del proveedor primario (U.S. EIA) o del histórico oficial en eia.gov/dnav.
 
 ## Catálogo de gráficos por país
 

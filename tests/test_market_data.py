@@ -32,7 +32,11 @@ class DnavHistoryTests(unittest.TestCase):
     def test_market_ladder_degrades_to_dnav_without_api_key(self):
         with tempfile.TemporaryDirectory() as folder:
             with patch.dict(os.environ, {"FUELINTEL_DATA_DIR": folder}):
-                with patch("fuelintel.market_intelligence._history", return_value=[]):
+                with patch("fuelintel.market_intelligence._history", return_value=[]), \
+                     patch(
+                        "fuelintel.market_intelligence._history_dnav",
+                        side_effect=lambda name, **kw: _history_dnav(name, body=FIXTURE.read_bytes()),
+                     ):
                     series = load_market_series()
                 self.assertIn("ULSD", series)
                 self.assertGreater(series["ULSD"][-1][0], "2024-01-01")

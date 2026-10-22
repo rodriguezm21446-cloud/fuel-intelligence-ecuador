@@ -38,7 +38,7 @@ def save_market_history(path: Path, raw_series: dict[str, list[tuple[str, float]
         db.register("incoming_market_rows", frame.to_arrow())
         db.execute(
             """INSERT OR REPLACE INTO market_observations
-            SELECT symbol, observed_date, close, ?::TIMESTAMPTZ, 'Yahoo Finance direct'
+            SELECT symbol, observed_date, close, ?::TIMESTAMPTZ, 'U.S. EIA'
             FROM incoming_market_rows""",
             [retrieved_at],
         )

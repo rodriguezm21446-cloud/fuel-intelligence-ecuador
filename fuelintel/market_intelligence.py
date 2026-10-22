@@ -215,7 +215,8 @@ def estimate_direction(rows: list[tuple[str, float]], horizon: int = 5) -> Marke
 
 
 def _source_line(
-    labels: list[str], provider: str = "Yahoo Finance", publication_note: str = "datos diferidos"
+    labels: list[str], provider: str = "U.S. Energy Information Administration (EIA)",
+    publication_note: str = "publicación oficial",
 ) -> str:
     if not labels:
         return f"Fuente: {provider}"
@@ -655,7 +656,7 @@ def build_price_gap_payload(
         "chartKind": "bar",
         "zeroBaseline": True,
         "insight": detail + ". Diferencia medida; no incluye impuestos, subsidios, flete ni márgenes.",
-        "source": "Fuente: precio oficial de Ecuador + cotizaciones internacionales (Yahoo Finance)",
+        "source": "Fuente: precio oficial de Ecuador + cotizaciones internacionales (U.S. EIA)",
         "credit": own_data_label(),
         "displayDecimals": 2,
         "valuePrefix": "$",
@@ -749,7 +750,7 @@ def build_market_sections(
         squawk = trim_x(
             f"Mercado energético | {'Cierres al ' + datetime.fromisoformat(latest).strftime('%d/%m/%Y') if same_date else 'Últimos cierres disponibles'}: "
             + " | ".join(short_values)
-            + ". Datos diferidos: Yahoo Finance.",
+            + ". Fuente oficial: U.S. EIA.",
             300,
         ) if latest else "Mercado energético | No hay cierres suficientes para publicar."
 
