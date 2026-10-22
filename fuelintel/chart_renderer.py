@@ -13,14 +13,29 @@ CHART_JS_URLS = (
 DISPLAY_DECIMALS = 3
 
 
+EDITORIAL_TOKENS = {
+    "background": "#FFFFFF",
+    "foreground": "#1D3049",
+    "muted": "#5F6B74",
+    "axis": "#8C97A0",
+    "grid": "#E4E7EA",
+    "border": "#B9BEC3",
+}
+
+
 def build_chart_html(payload: dict, chart_js_url: str = CHART_JS_URLS[0]) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     light = payload.get("theme") == "light"
-    background = "#F3F0E8" if light else "#000000"
-    foreground = "#171717" if light else "#E8E8E8"
-    muted = "#5F6368" if light else "#A7ADB4"
-    axis = "#303030" if light else "#D1D5DB"
-    headline = "#1473B8" if light else "#8CC8FF"
+    editorial = payload.get("theme") == "editorial"
+    background = "#FFFFFF" if editorial else ("#F3F0E8" if light else "#000000")
+    foreground = "#1D3049" if editorial else ("#171717" if light else "#E8E8E8")
+    muted = "#5F6B74" if editorial else ("#5F6368" if light else "#A7ADB4")
+    axis = "#8C97A0" if editorial else ("#303030" if light else "#D1D5DB")
+    grid = "#E4E7EA" if editorial else "#303030"
+    headline = "#1D3049" if editorial else ("#1473B8" if light else "#8CC8FF")
+    legend_section = "" if editorial else '<div class="legend" id="legend"></div>'
+    title_font = "44px" if editorial else "37px"
+    plot_margin = "margin: 0 150px 0 76px;" if editorial else "margin: 0 110px 0 100px;"
     return f"""<!doctype html>
 <html lang="es">
 <head>
@@ -33,14 +48,16 @@ def build_chart_html(payload: dict, chart_js_url: str = CHART_JS_URLS[0]) -> str
     * {{ box-sizing: border-box; }}
     html, body {{ margin: 0; width: 1600px; height: 900px; overflow: hidden; background: {background}; }}
     body {{ color: {foreground}; font-family: Inter, Arial, sans-serif; font-variant-numeric: tabular-nums; }}
-    main {{ width: 1600px; height: 900px; padding: 42px 60px 28px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; }}
-    h1 {{ margin: 0; color: {headline}; font-size: 37px; line-height: 1.1; letter-spacing: -0.025em; }}
+    main {{ width: 1600px; height: 900px; padding: 52px 60px 30px 60px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 12px; }}
+    h1 {{ margin: 0; color: {headline}; font-size: {title_font}; line-height: 1.14; letter-spacing: -0.022em; font-weight: 700; max-width: 1400px; }}
     .subtitle {{ margin-top: 8px; color: {muted}; font-size: 19px; }}
+    .context {{ margin-top: 10px; color: {muted}; font-size: 17px; line-height: 1.5; display: grid; gap: 4px; }}
+    .context-title {{ font-weight: 700; color: {foreground}; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; }}
     .legend {{ display: flex; flex-wrap: wrap; gap: 24px; min-height: 28px; align-items: center; font-size: 16px; }}
     .legend-item {{ display: flex; gap: 9px; align-items: center; }}
     .swatch {{ width: 27px; height: 4px; display: inline-block; }}
     .pending {{ border-top: 3px dashed #a7adb4; height: 0; }}
-    .plot {{ position: relative; min-height: 0; margin: 0 110px 0 100px; overflow: visible; }}
+    .plot {{ position: relative; min-height: 0; {plot_margin} overflow: visible; }}
     canvas {{ width: 100% !important; height: 100% !important; overflow: visible; }}
     footer {{ min-height: 34px; display: grid; align-content: end; }}
     .source {{ color: {muted}; font-size: 14px; }}
@@ -48,8 +65,8 @@ def build_chart_html(payload: dict, chart_js_url: str = CHART_JS_URLS[0]) -> str
 </head>
 <body>
 <main>
-  <header><h1 id="title"></h1><div class="subtitle" id="subtitle"></div></header>
-  <div class="legend" id="legend"></div>
+  <header><h1 id="title"></h1><div class="subtitle" id="subtitle"></div><div class="context" id="context" style="display: none;"></div></header>
+  {legend_section}
   <div class="plot"><canvas id="chart"></canvas></div>
   <footer><div class="source" id="source"></div></footer>
 </main>
@@ -60,12 +77,27 @@ const VALUE_PREFIX = P.valuePrefix === undefined ? '$' : P.valuePrefix;
 const VALUE_SUFFIX = P.valueSuffix || '';
 const MUTED = '{muted}', AXIS = '{axis}';
 const CHART_KIND = P.chartKind || (P.stepped ? 'step' : 'line');
-const formatValue = value => VALUE_PREFIX + Number(value).toFixed(DISPLAY_DECIMALS) + VALUE_SUFFIX;
+const EDITORIAL = P.theme === 'editorial';
+const formatRaw = value => Number(value).toFixed(DISPLAY_DECIMALS);
+const formatValue = value => VALUE_PREFIX + (EDITORIAL ? formatRaw(value).replace('.', ',') : formatRaw(value)) + VALUE_SUFFIX;
 document.getElementById('title').textContent = P.title;
 document.getElementById('subtitle').textContent = P.subtitle;
 document.getElementById('source').textContent = P.source;
+const contextBox = document.getElementById('context');
+if (Array.isArray(P.context) && P.context.length && contextBox) {{
+  contextBox.style.display = 'grid';
+  const heading = document.createElement('div');
+  heading.className = 'context-title';
+  heading.textContent = 'Contexto';
+  contextBox.append(heading);
+  for (const line of P.context) {{
+    const row = document.createElement('div');
+    row.textContent = `· ${{line}}`;
+    contextBox.append(row);
+  }}
+}}
 const legend = document.getElementById('legend');
-for (const ds of P.datasets) {{
+if (legend) for (const ds of P.datasets) {{
   if (ds.colorsBySign) {{
     for (const [text, color] of [['Subida', '#71866C'], ['Bajada', '#9A5E57']]) {{
       const item = document.createElement('span'); item.className = 'legend-item';
@@ -100,15 +132,24 @@ const annotationPlugin = {{
   afterDatasetsDraw(chart) {{
     const ctx = chart.ctx, area = chart.chartArea;
     ctx.save(); ctx.font = '600 13px Inter, Arial, sans-serif';
-    const endpoints = [];
+    const labels = [];
     if (P.showEndpointLabels !== false && !['bar', 'stacked-bar'].includes(CHART_KIND)) chart.data.datasets.forEach((ds, index) => {{
       const meta = chart.getDatasetMeta(index); let last = -1;
       ds.data.forEach((value, i) => {{ if (value !== null && value !== undefined) last = i; }});
       if (last >= 0 && meta.data[last]) {{
-        const point = meta.data[last]; ctx.fillStyle = ds.borderColor; ctx.beginPath(); ctx.arc(point.x, point.y, 3.5, 0, Math.PI * 2); ctx.fill();
-        endpoints.push({{ point, color: ds.borderColor, text: `${{ds.label}} ${{formatValue(ds.data[last])}}` }});
+        const point = meta.data[last]; ctx.fillStyle = ds.borderColor; ctx.beginPath(); ctx.arc(point.x, point.y, 4, 0, Math.PI * 2); ctx.fill();
+        labels.push({{ point, color: ds.borderColor, text: `${{ds.label}} ${{formatValue(ds.data[last])}}`, align: EDITORIAL ? 'left' : 'right', dx: EDITORIAL ? 12 : -10 }});
       }}
     }});
+    for (const marker of (P.minimums || [])) {{
+      const meta = chart.getDatasetMeta(marker.datasetIndex);
+      const point = meta.data[marker.index];
+      if (!point) continue;
+      const color = chart.data.datasets[marker.datasetIndex].borderColor;
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.fillStyle = '{background}';
+      ctx.beginPath(); ctx.arc(point.x, point.y, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      labels.push({{ point, color, text: marker.text, align: 'center', dx: 0, yShift: -18, fixed: true }});
+    }}
     if (['bar', 'stacked-bar'].includes(CHART_KIND)) chart.data.datasets.forEach((ds, index) => {{
       const meta = chart.getDatasetMeta(index);
       meta.data.forEach((bar, i) => {{
@@ -118,21 +159,25 @@ const annotationPlugin = {{
         ctx.fillText(formatValue(value), bar.x, Number(value) >= 0 ? bar.y - 9 : bar.y + 18);
       }});
     }});
-    // Resolve endpoint-label collisions and keep labels away from mirrored Y ticks.
-    endpoints.sort((a, b) => a.point.y - b.point.y);
+    // Resolve label collisions: floating labels move, minimum markers stay and push neighbors.
     const minimumGap = 24;
+    const nonFixed = labels.filter(item => !item.fixed);
+    nonFixed.sort((a, b) => a.point.y - b.point.y);
     let previousY = area.top - minimumGap;
-    for (const endpoint of endpoints) {{
-      endpoint.labelY = Math.max(endpoint.point.y - 14, previousY + minimumGap);
-      previousY = endpoint.labelY;
+    for (const item of nonFixed) {{
+      item.labelY = Math.max(item.point.y - 14, previousY + minimumGap);
+      previousY = item.labelY;
     }}
-    if (endpoints.length && endpoints[endpoints.length - 1].labelY > area.bottom - 8) {{
-      const shift = endpoints[endpoints.length - 1].labelY - (area.bottom - 8);
-      for (const endpoint of endpoints) endpoint.labelY -= shift;
+    if (nonFixed.length && nonFixed[nonFixed.length - 1].labelY > area.bottom - 8) {{
+      const shift = nonFixed[nonFixed.length - 1].labelY - (area.bottom - 8);
+      for (const item of nonFixed) item.labelY -= shift;
     }}
-    for (const endpoint of endpoints) {{
-      ctx.fillStyle = endpoint.color; ctx.textAlign = 'right';
-      ctx.fillText(endpoint.text, endpoint.point.x - 76, endpoint.labelY);
+    for (const item of labels) {{
+      if (item.fixed) item.labelY = item.point.y + (item.yShift || -18);
+    }}
+    for (const item of labels) {{
+      ctx.fillStyle = item.color; ctx.textAlign = item.align;
+      ctx.fillText(item.text, item.point.x + item.dx, item.labelY);
     }}
     ctx.font = '600 11px Inter, Arial, sans-serif'; ctx.fillStyle = MUTED;
     for (const note of (P.annotations || [])) {{
@@ -171,11 +216,11 @@ new Chart(document.getElementById('chart'), {{
   }})) }},
   options: {{
     responsive: true, maintainAspectRatio: false, animation: false, normalized: true,
-    layout: {{ padding: {{ top: 16, right: 96, bottom: 20, left: 90 }} }},
+    layout: {{ padding: {{ top: 16, right: EDITORIAL ? 140 : 96, bottom: 20, left: EDITORIAL ? 100 : 90 }} }},
     plugins: {{ legend: {{ display: false }}, tooltip: {{ enabled: false }} }},
     scales: {{
-      x: {{ stacked: CHART_KIND === 'stacked-bar', grid: {{ display: false }}, border: {{ display: false }}, ticks: {{ align: 'inner', padding: 10, color: MUTED, maxTicksLimit: 6, font: {{ family: 'Inter', size: 12 }} }} }},
-      y: {{ stacked: CHART_KIND === 'stacked-bar', position: 'right', grace: '8%', grid: {{ display: false }}, border: {{ display: false }}, ticks: {{ mirror: false, padding: 12, align: 'inner', color: AXIS, callback: value => formatValue(value), font: {{ family: 'Inter', size: 12 }} }} }}
+      x: {{ stacked: CHART_KIND === 'stacked-bar', grid: {{ display: false }}, border: {{ display: EDITORIAL, color: '{axis}', lineWidth: 1.5 }}, ticks: {{ align: 'inner', padding: 10, color: MUTED, maxTicksLimit: 6, font: {{ family: 'Inter', size: 13 }} }} }},
+      y: {{ stacked: CHART_KIND === 'stacked-bar', position: EDITORIAL ? 'left' : 'right', grace: '8%', grid: {{ display: EDITORIAL, color: '{grid}', lineWidth: 1 }}, border: {{ display: false }}, ticks: {{ mirror: false, padding: 12, align: 'inner', color: AXIS, callback: value => formatValue(value), font: {{ family: 'Inter', size: 13 }} }} }}
     }}
   }}
 }});

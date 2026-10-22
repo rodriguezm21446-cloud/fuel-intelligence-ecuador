@@ -225,6 +225,13 @@ function buildPriceFlash(diff, vigencia, sourceName) {
   return lines.join("\n");
 }
 
+function priceFlashTitle(changes, vigencia) {
+  const parts = changes.map((c) => `${c.label} $${c.to.toFixed(2)}`);
+  let title = `Actualización oficial de precios: ${parts.join(" · ")}`;
+  if (vigencia) title += ` (vigencia ${vigencia})`;
+  return title.slice(0, 500);
+}
+
 async function handlePriceFlash(env, source, body, detectedAt) {
   const parsed = extractOfficialPrices(body);
   if (!parsed) return; // unparseable page: no flash (better late than wrong)
@@ -244,6 +251,13 @@ async function handlePriceFlash(env, source, body, detectedAt) {
         });
         if (response.ok) await response.json();
       } catch { /* transient network error: the cache row below is not yet updated, so the next poll retries */ }
+    }
+    // The flash reaches the chat in seconds; the editorial chart with the full
+    // context follows when GitHub starts the Python/Chromium job. Dispatch only
+    // on real changes so every vigencia produces exactly one follow-up.
+    if (previous && changes.length && env.GITHUB_TOKEN && env.GITHUB_REPOSITORY) {
+      const ticket = { source, url: source.url, title: priceFlashTitle(changes, parsed.vigencia), detectedAt };
+      await dispatchGithub(env, ticket, "").catch(() => null);
     }
   }
   await env.DB.prepare(

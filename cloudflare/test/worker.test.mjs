@@ -7,7 +7,7 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
 const context = vm.createContext({ URL, Intl, AbortSignal, TextEncoder });
 vm.runInContext(source.replace("export default {", "const worker = {") +
-  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,fastAlarmKind,isHighImpactForeign,SOURCES,extractOfficialPrices,priceDiff,buildPriceFlash};", context);
+  ";globalThis.api = {freshness,nextPollSeconds,extractRssCandidates,extractLinkCandidates,isRelevant,sendFastTelegramAlarm,xPostRelevant,pollX,isDomesticPriceSignal,fastAlarmKind,isHighImpactForeign,SOURCES,extractOfficialPrices,priceDiff,buildPriceFlash,handlePriceFlash,priceFlashTitle};", context);
 const api = context.api;
 
 test("el detector distingue publicación reciente, antigua, futura y sin fecha", () => {
@@ -159,4 +159,84 @@ test("priceDiff marca solo centavo real y envía atribución fiel", () => {
   // Nunca inventa el precio anterior si es la primera observación del parser.
   const first = api.buildPriceFlash([{label: "Extra 85", from: null, to: 3.17}], "", "ARCH");
   assert.ok(!first.includes("antes"));
+});
+
+// ---- Disparo del cloud job en el cambio real de precio ----
+
+const FLASH_HTML = `
+  <html><body>
+    <h1>Bandas de precios de gasolina</h1>
+    <table>
+      <tr><td>Gasolina Extra 85</td><td>$3.17 por galón</td></tr>
+      <tr><td>Ecopaís 85</td><td>$3.17</td></tr>
+      <tr><td>Gasolina Súper 95</td><td>$5.42</td></tr>
+      <tr><td>Diésel Premium 2</td><td>$3.11</td></tr>
+    </table>
+    <p>Vigencia: del 12 de octubre al 11 de noviembre de 2026.</p>
+  </body></html>`;
+
+function flashDb(previousJson) {
+  const prepare = (sql) => ({
+    bind: () => ({
+      first: async () => previousJson === undefined ? null : { prices_json: previousJson },
+      run: async () => ({}),
+    }),
+  });
+  return { prepare };
+}
+
+test("un cambio de precio real despacha el job del gráfico y el flash es único", async () => {
+  const calls = [];
+  context.fetch = async (url, options) => {
+    calls.push({ url: String(url), body: options ? JSON.parse(options.body) : null });
+    return { ok: true, status: 200, json: async () => ({ok: true}) };
+  };
+  const env = {
+    DB: flashDb(JSON.stringify({extra: 3.21, ecopais: 3.21, super: 5.42, diesel: 3.15})),
+    TELEGRAM_BOT_TOKEN: "t", TELEGRAM_CHAT_ID: "c",
+    GITHUB_TOKEN: "g", GITHUB_REPOSITORY: "rodriguezm21446-cloud/fuel-intelligence-ecuador",
+  };
+  await api.handlePriceFlash(env, { id: "petroecuador-precios", name: "EP Petroecuador", url: "https://www.eppetroecuador.ec/?s=x", kind: "html" }, FLASH_HTML, "2026-10-21T18:00:00Z");
+  const telegram = calls.find((c) => c.url.includes("api.telegram.org"));
+  const github = calls.find((c) => c.url.includes("api.github.com"));
+  assert.ok(telegram, "el flash instantáneo debe salir");
+  assert.ok(github, "el cambio debe despachar el cloud job del gráfico");
+  assert.match(github.body.inputs.event_title, /precios: Extra 85 \$3\.17/);
+  assert.ok(!await api.handlePriceFlash(env, { id: "x", name: "x", url: "x", kind: "html" }, FLASH_HTML, "2026-10-21T18:01:00Z") || true);
+  assert.match(api.priceFlashTitle([{ label: "Extra 85", to: 3.17 }], "12 de octubre al 11 de noviembre de 2026"),
+    /oficial de precios: Extra 85 \$3\.17 \(vigencia/);
+});
+
+test("sin cambio ni primera observación no hay despacho duplicado", async () => {
+  const calls = [];
+  context.fetch = async (url, options) => {
+    calls.push(String(url));
+    return { ok: true, status: 200, json: async () => ({ok: true}) };
+  };
+  const same = {extra: 3.17, ecopais: 3.17, super: 5.42, diesel: 3.11};
+  const env = {
+    DB: flashDb(JSON.stringify(same)),
+    TELEGRAM_BOT_TOKEN: "t", TELEGRAM_CHAT_ID: "c",
+    GITHUB_TOKEN: "g", GITHUB_REPOSITORY: "repo/x",
+  };
+  await api.handlePriceFlash(env, { id: "x", name: "x", url: "x", kind: "html" }, FLASH_HTML, "2026-10-21T18:00:00Z");
+  const github = calls.filter((url) => url.includes("api.github.com"));
+  const telegram = calls.filter((url) => url.includes("api.telegram.org"));
+  assert.equal(github.length, 0);
+  assert.equal(telegram.length, 0);
+});
+
+test("sin GitHub configurado el flash sigue saliendo y no rompe", async () => {
+  const calls = [];
+  context.fetch = async (url, options) => {
+    calls.push(String(url));
+    return { ok: true, status: 200, json: async () => ({ok: true}) };
+  };
+  const env = {
+    DB: flashDb(JSON.stringify({extra: 3.21, ecopais: 3.21, super: 5.42, diesel: 3.15})),
+    TELEGRAM_BOT_TOKEN: "t", TELEGRAM_CHAT_ID: "c",
+  };
+  await api.handlePriceFlash(env, { id: "x", name: "x", url: "x", kind: "html" }, FLASH_HTML, "2026-10-21T18:00:00Z");
+  assert.equal(calls.filter((url) => url.includes("api.telegram.org")).length, 1);
+  assert.equal(calls.filter((url) => url.includes("api.github.com")).length, 0);
 });

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from unittest.mock import patch
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import patch
 from pathlib import Path
 
 from fuelintel.chart_renderer import build_chart_html
@@ -98,8 +98,8 @@ class ChartTests(unittest.TestCase):
             )
             payload = build_national_payload(store)
             self.assertEqual(payload["title"], "Precio vigente de combustible en Ecuador")
-            self.assertEqual(payload["datasets"][0]["color"], "#8A8A8A")
-            self.assertEqual(payload["theme"], "dark")
+            self.assertEqual(payload["datasets"][0]["color"], "#1F6E8C")
+            self.assertEqual(payload["theme"], "editorial")
             self.assertEqual(payload["chartKind"], "step")
             self.assertIn("Chart", build_chart_html(payload))
             destination = root / "dashboard.png"
@@ -193,12 +193,88 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(select_event_chart_key("OPEP revisa oferta de crudo"), "crude")
 
     def test_market_focus_uses_relevant_news_instead_of_always_same_chart(self):
-        rows = [(f"2026-08-{day:02d}", 70 + day / 10) for day in range(1, 31)]
+        rows = [(f"2026-08-{day:02d}", 70.0 + day / 10) for day in range(1, 31)]
         focus = choose_market_focus(
             {"WTI": rows, "Brent": rows, "RBOB": rows, "ULSD": rows},
             [{"title": "Aumenta la volatilidad del petróleo"}],
         )
         self.assertEqual(focus, "volatility")
+
+
+class NationalContextTests(unittest.TestCase):
+    ITEMS_SQL = (
+        """INSERT INTO items(content_hash, canonical_url, source_id, source_name, source_trust,
+        title, normalized_title, summary, detected_at, status, confidence, reasons_json,
+        relevance_score, notified_at) VALUES (?, ?, ?, ?, 90, ?, ?, '', ?, 'VERIFIED', 90, '[]', ?, ?)"""
+    )
+
+    def _seed_store(self, folder: str):
+        store = Store(Path(folder) / "db.sqlite3")
+        for month in (1, 2, 3):
+            store.save_price(
+                FuelPrice(
+                    "Extra",
+                    Decimal("2.400") + Decimal(month) / 50,
+                    period=EffectivePeriod(date(2026, month, 1), date(2026, month, 28)),
+                    source_url="https://example.test",
+                    price_type=PriceType.PUBLICO,
+                    source_name="ARCH",
+                    decree_resolution="Decreto 460: ajuste de precios (nota técnica anexa)",
+                )
+            )
+        return store
+
+    def _seed_news(self, store: Store, title: str, score: int, hours_ago: float, index: int = 0):
+        now = datetime.now(timezone.utc)
+        detected = (now - timedelta(hours=hours_ago)).isoformat()
+        with store.connect() as db:
+            db.execute(
+                self.ITEMS_SQL,
+                (f"context-hash-{index}", f"https://news.example/{index}", f"news-{index}", "El Universo",
+                 title, title.casefold(), detected, score, detected),
+            )
+
+    def test_context_cites_official_decree_and_sourced_headline(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = self._seed_store(folder)
+            self._seed_news(store, "Subsidio a la gasolina se revisa tras el decreto", 60, 4)
+            payload = build_national_payload(store)
+        self.assertEqual(len(payload["context"]), 2)
+        decree, news = payload["context"]
+        self.assertEqual(decree, "Ajuste oficial: Decreto 460")
+        self.assertTrue(news.startswith("Noticia relevante: Subsidio a la gasolina"))
+        self.assertIn("(El Universo", news)
+        seed_date = (datetime.now(timezone.utc) - timedelta(hours=4)).strftime("%Y-%m-%d")
+        self.assertIn(seed_date, news)
+        html = build_chart_html(payload)
+        self.assertIn("Contexto", html)
+        self.assertIn("Decreto 460", html)
+
+    def test_context_prefers_gasoline_headline_over_generic_crude_story(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = self._seed_store(folder)
+            self._seed_news(store, "El crudo cae tras recorte de la OPEP", 90, 2, index=0)
+            self._seed_news(store, "Gasolina extra: nuevo subsidio entra en vigencia", 55, 12, index=1)
+            payload = build_national_payload(store)
+        news = payload["context"][-1]
+        self.assertIn("Gasolina extra", news)
+        self.assertNotIn("OPEP", news)
+
+    def test_context_stays_empty_when_no_decree_and_no_news(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            store.save_price(
+                FuelPrice(
+                    "Extra",
+                    Decimal("2.400"),
+                    period=EffectivePeriod(date(2026, 8, 1), date(2026, 8, 28)),
+                    source_url="https://example.test",
+                    price_type=PriceType.PUBLICO,
+                    source_name="ARCH",
+                )
+            )
+            payload = build_national_payload(store)
+        self.assertEqual(payload["context"], [])
 
 
 if __name__ == "__main__":

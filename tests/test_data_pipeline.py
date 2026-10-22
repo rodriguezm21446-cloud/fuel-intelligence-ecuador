@@ -100,15 +100,15 @@ class DataArchitectureTests(unittest.TestCase):
         self.assertIn("color: #8CC8FF", html)
         self.assertNotIn('id="insight"', html)
         self.assertNotIn('id="credit"', html)
-        self.assertIn("position: 'right'", html)
+        self.assertIn("position: EDITORIAL ? 'left' : 'right'", html)
         self.assertIn("align: 'inner'", html)
         # The right-side axis now reserves its own width instead of mirroring
         # labels into the plot; this prevents first/last tick clipping.
         self.assertIn("mirror: false", html)
         self.assertIn("grid: { display: false }", html)
         self.assertIn("margin: 0 110px 0 100px", html)
-        self.assertIn("right: 96", html)
-        self.assertIn("left: 90", html)
+        self.assertIn("right: EDITORIAL ? 140 : 96", html)
+        self.assertIn("left: EDITORIAL ? 100 : 90", html)
         self.assertIn("overflow: visible", html)
         self.assertIn("Number.isInteger(P.displayDecimals)", html)
         self.assertGreaterEqual(html.count("formatValue("), 3)

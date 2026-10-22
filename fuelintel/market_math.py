@@ -84,6 +84,13 @@ def validate_chart_payload(payload: dict, *, heatmap: bool = False) -> None:
     if not isinstance(decimals, int) or not 0 <= decimals <= 6:
         raise DataIntegrityError("precisión decimal fuera de rango")
 
+    context = payload.get("context", []) or []
+    if not isinstance(context, list) or len(context) > 3:
+        raise DataIntegrityError("el bloque de contexto no es una lista corta")
+    for line in context:
+        if not isinstance(line, str) or not line.strip() or len(line) > 220:
+            raise DataIntegrityError("línea de contexto vacía o demasiado larga")
+
     labels_count = len(labels)
     series_labels: set[str] = set()
     for dataset in datasets:
@@ -116,3 +123,20 @@ def validate_chart_payload(payload: dict, *, heatmap: bool = False) -> None:
             index = int(annotation.get("index", -1))
             if index < 0 or index >= labels_count:
                 raise DataIntegrityError("anotación fuera del eje X")
+
+    series_count = len(datasets)
+    for marker in payload.get("minimums", []) or []:
+        dataset_index = int(marker.get("datasetIndex", -1))
+        index = int(marker.get("index", -1))
+        if not str(marker.get("text", "")).strip():
+            raise DataIntegrityError("marcador de mínimo sin texto")
+        if not 0 <= dataset_index < series_count:
+            raise DataIntegrityError("marcador de mínimo fuera de las series")
+        if index < 0 or index >= labels_count:
+            raise DataIntegrityError("marcador de mínimo fuera del eje X")
+        value = datasets[dataset_index]["values"][index]
+        if value is None or not isfinite(float(value)):
+            raise DataIntegrityError("marcador de mínimo sin valor")
+        present = [float(item) for item in datasets[dataset_index]["values"] if item is not None]
+        if present and abs(float(value) - min(present)) > 1e-9:
+            raise DataIntegrityError("el marcador no apunta al mínimo real de la serie")
