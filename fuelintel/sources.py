@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import html
+import logging
 import re
 import urllib.error
 import urllib.request
@@ -10,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from .extractors import extract_pdf_text
 from .models import Candidate, SourceSpec
@@ -19,6 +21,13 @@ from .text import canonical_url, collapse_spaces, fold
 
 
 USER_AGENT = "FuelIntelligenceEcuador/0.1 (+private research monitor; respectful conditional polling)"
+# Several Ecuadorian media block unknown bots on article pages, so the article
+# reader presents a mainstream browser identity. Feed polling keeps the honest
+# custom identifier.
+ARTICLE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,8 +44,12 @@ class HttpClient:
     def __init__(self, timeout: int = 20):
         self.timeout = timeout
 
-    def get(self, url: str, etag: str | None = None, last_modified: str | None = None) -> FetchResult:
-        headers = {"User-Agent": USER_AGENT, "Accept": "application/rss+xml, application/xml, text/html, application/pdf;q=0.9, */*;q=0.5"}
+    def get(
+        self, url: str, etag: str | None = None, last_modified: str | None = None,
+        *, browser_identity: bool = False,
+    ) -> FetchResult:
+        user_agent = ARTICLE_USER_AGENT if browser_identity else USER_AGENT
+        headers = {"User-Agent": user_agent, "Accept": "application/rss+xml, application/xml, text/html, application/pdf;q=0.9, */*;q=0.5"}
         if etag:
             headers["If-None-Match"] = etag
         if last_modified:
@@ -356,10 +369,26 @@ class SourcePoller:
     def enrich(self, candidate: Candidate) -> Candidate:
         if candidate.raw_kind not in {"link", "rss"}:
             return candidate
+        target = candidate.url
         try:
-            result = self.client.get(candidate.url)
+            result = self.client.get(target, browser_identity=True)
         except Exception:
+            self._log_enrich(candidate, 0, "fetch_failed")
             return candidate
+        resolved_url = result.url
+        if "news.google.com" in result.url:
+            resolved = _resolve_google_news_link(candidate.url, result.body)
+            if resolved:
+                try:
+                    result = self.client.get(resolved, browser_identity=True)
+                    resolved_url = result.url
+                except Exception:
+                    self._log_enrich(candidate, 0, "publisher_fetch_failed")
+                    return candidate
+            else:
+                self._log_enrich(candidate, 0, "publisher_unresolved")
+                return candidate
+        candidate.url = resolved_url
         if "pdf" in result.content_type or result.url.lower().endswith(".pdf"):
             candidate.body = extract_pdf_text(result.body)
             candidate.raw_kind = "pdf"
@@ -371,4 +400,32 @@ class SourcePoller:
         candidate.content_hash = hashlib.sha256(
             f"{canonical_url(candidate.url)}\n{fold(candidate.title)}\n{fold(candidate.summary or candidate.body)}".encode("utf-8")
         ).hexdigest()
+        self._log_enrich(candidate, len(candidate.body or ""), "ok")
         return candidate
+
+    @staticmethod
+    def _log_enrich(candidate: Candidate, body_len: int, outcome: str) -> None:
+        logging.getLogger("fuelintel").info(
+            "WF_02_READER source=%s outcome=%s body_len=%d url=%s",
+            candidate.source.id, outcome, body_len, canonical_url(candidate.url),
+        )
+
+
+def _resolve_google_news_link(url: str, page: bytes) -> str | None:
+    """Resolve a news.google.com article link to its publisher URL.
+
+    The path segment after /articles/ is a base64url protobuf blob that embeds
+    the publisher URL; a direct decode avoids the JavaScript consent page.
+    """
+    path = urlsplit(url).path
+    segment = path.rsplit("/", 1)[-1]
+    if not re.match(r"^CBMi", segment):
+        return None
+    try:
+        decoded = base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)).decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    for match in re.findall(r"https?://[A-Za-z0-9._%-]+\.[A-Za-z]{2,}[^\x01-\x1f\s]*", decoded):
+        if all(bad not in match for bad in ("google.", "youtube.", "news.com")):
+            return match
+    return None

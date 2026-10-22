@@ -16,7 +16,7 @@ from fuelintel.formatting import (
     format_news_alert,
     format_unconfirmed_news_squawk,
 )
-from fuelintel.models import Candidate, FuelPrice, SourceSpec, VerificationStatus
+from fuelintel.models import Candidate, FuelPrice, PriceType, SourceSpec, VerificationStatus
 from fuelintel.pipeline import Pipeline
 from fuelintel.storage import Store
 from fuelintel.setup_telegram import latest_private_chat
@@ -391,6 +391,64 @@ class PipelineSafetyTests(unittest.TestCase):
             self.assertEqual(len(notifier.messages), 2)
             self.assertIn("Aún no es precio oficial", notifier.messages[0])
             self.assertIn("No publicar todavía", notifier.messages[1])
+
+    def test_second_pending_report_same_topic_is_rate_limited(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / "db.sqlite3")
+            notifier = _CaptureNotifier()
+            news = SourceSpec(
+                id="primicias-economia",
+                name="Primicias - Economía",
+                url="https://example.test/economia",
+                kind="html_links",
+                trust=75,
+                country="EC",
+                max_age_hours=36,
+            )
+            pipeline = Pipeline(store, _NoEnrichment(), notifier, timezone.utc)
+            base = dict(
+                source=news,
+                body="Precios del 12 de septiembre al 11 de octubre de 2026. Extra $3.21 Diésel Premium $3.15",
+                published_at=datetime(2026, 9, 11, 20, 0, tzinfo=timezone.utc),
+            )
+            first = Candidate(
+                title="Cambian los precios de gasolina Extra y diésel en Ecuador",
+                url="https://example.test/nuevo-precio",
+                detected_at=datetime(2026, 9, 11, 20, 1, tzinfo=timezone.utc),
+                content_hash="early-price-news",
+                **base,
+            )
+            self.assertTrue(pipeline.process(first).notified)
+            second = Candidate(
+                title="Segunda nota sobre los precios de gasolina Extra y diésel",
+                url="https://example.test/eco-nuevo-precio",
+                detected_at=datetime(2026, 9, 11, 21, 1, tzinfo=timezone.utc),
+                content_hash="early-price-news-b",
+                **base,
+            )
+            result = pipeline.process(second)
+            self.assertEqual(result.status, VerificationStatus.PENDING)
+            self.assertFalse(result.notified)
+            self.assertEqual(len(notifier.messages), 2)
+
+    def test_unconfirmed_price_sections_are_compact(self):
+        from fuelintel.formatting import build_unconfirmed_price_sections
+
+        source = SourceSpec(id="s", name="Primicias", url="https://example.test/s", kind="html_links", trust=75)
+        candidate = Candidate(source=source, title="Precios de gasolina", url="https://example.test/p")
+        price = FuelPrice(
+            product="Extra", price=Decimal("3.21"), unit="galón",
+            period=extract_effective_period("del 12 de septiembre al 11 de octubre de 2026"),
+            price_type=PriceType.PUBLICO,
+            observed_at=datetime(2026, 9, 11, 14, 0, tzinfo=timezone.utc),
+            verified_at=datetime(2026, 9, 11, 14, 0, tzinfo=timezone.utc),
+        )
+        sections = build_unconfirmed_price_sections(
+            candidate, [price], datetime(2026, 9, 11, 14, 0, tzinfo=timezone.utc), ["PRICE_PENDING_OFFICIAL_PDF"]
+        )
+        self.assertIn("No publicar todavía", sections.context)
+        self.assertNotIn("El sistema seguirá", sections.context)
+        self.assertNotIn("VERIFICACIÓN PENDIENTE", sections.context)
 
     def test_expired_price_is_never_sent_or_saved_as_current(self):
         with tempfile.TemporaryDirectory() as folder:

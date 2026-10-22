@@ -106,6 +106,23 @@ PRIMARY_FUEL_TERMS = {
     "oil price", "oil prices", "diesel fuel", "refining", "crude",
 }
 
+def pending_topic(candidate: Candidate) -> str:
+    """Stable topic key used to rate-limit pending watch messages.
+
+    Two stories about the same official episode ("gasolina", "diésel", ARCS…)
+    collapse to one key so the operator gets at most one watch ping per window.
+    """
+    title = fold(candidate.title)
+    canonical_terms = {
+        "extra": "extra", "ecopais": "ecopais", "super": "super", "premium": "premium",
+        "diesel": "diesel", "gasolina": "gasolina", "glp": "glp", "gas licuado": "glp",
+        "precios": "precios", "precio": "precio", "subsidio": "subsidio", "arcs": "arcs",
+        "archo": "archo", "petroecuador": "petroecuador", "dividend": "dividendo",
+    }
+    keys = sorted({canonical for needle, canonical in canonical_terms.items() if needle in title})
+    return ":".join(keys or ["general"])
+
+
 def has_primary_fuel_title(candidate: Candidate) -> bool:
     """True when the headline itself belongs to the fuel domain."""
     title = fold(candidate.title)

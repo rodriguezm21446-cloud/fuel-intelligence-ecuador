@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass
 
 from .text import collapse_spaces, tidy_lines, trim_x
+
+
+class GeminiUnavailable(Exception):
+    """All retry attempts against the Gemini endpoint failed."""
 
 
 EDITORIAL_GUARDRAILS = (
@@ -97,6 +102,10 @@ class Editorial:
 class GeminiEditor:
     """Optional Gemini reviewer; discovery and verification stay deterministic."""
 
+    # 503 "high demand" and 429 are transient: the original single attempt
+    # turned short service spikes into "no summary" for the whole run.
+    RETRY_DELAYS: tuple[float, ...] = (0.0, 15.0, 45.0)
+
     def __init__(self, api_key: str, model: str, timeout_seconds: int = 60):
         self.api_key = api_key.strip()
         # The editorial run needs writing quality: default to the full flash
@@ -111,6 +120,41 @@ class GeminiEditor:
     @property
     def enabled(self) -> bool:
         return bool(self.api_key)
+
+    def _post_with_retry(self, payload: dict) -> dict:
+        """POST one generation request with backoff; return parsed JSON.
+
+        The Gemini service occasionally answers HTTP 503 "high demand" for a
+        short window; a single attempt turns that spike into "no summary at
+        all". 503/429 are retried after 15s and 45s; any other status fails
+        immediately because retrying cannot fix it.
+        """
+        request = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "x-goog-api-key": self.api_key,
+                "Content-Type": "application/json",
+                "User-Agent": "FuelIntelligenceEcuador/0.3",
+            },
+            method="POST",
+        )
+        delays: tuple[float, ...] = type(self).RETRY_DELAYS
+        last_failure = ""
+        for delay in delays:
+            if delay:
+                time.sleep(delay)
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", errors="replace")[:180]
+                last_failure = f"HTTP {error.code}: {detail}"
+                if error.code not in {503, 429}:
+                    break
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+                last_failure = f"{type(error).__name__}: {error}"
+        raise GeminiUnavailable(last_failure)
 
     def review(self, evidence: str, fallback_x: str) -> Editorial | None:
         self.last_error = ""
@@ -151,19 +195,12 @@ class GeminiEditor:
                 "responseSchema": schema,
             },
         }
-        request = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "x-goog-api-key": self.api_key,
-                "Content-Type": "application/json",
-                "User-Agent": "FuelIntelligenceEcuador/0.3",
-            },
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                raw = json.loads(response.read().decode("utf-8"))
+            raw = self._post_with_retry(payload)
+        except GeminiUnavailable as error:
+            self.last_error = f"Gemini no respondióTras reintentos: {error}"[:500]
+            return None
+        try:
             content = raw["candidates"][0]["content"]["parts"][0]["text"]
             parsed = json.loads(content)
             analysis = tidy_lines(str(parsed.get("analysis", "")))[:1100].strip()
@@ -235,19 +272,12 @@ class GeminiEditor:
                 "responseSchema": schema,
             },
         }
-        request = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "x-goog-api-key": self.api_key,
-                "Content-Type": "application/json",
-                "User-Agent": "FuelIntelligenceEcuador/0.3",
-            },
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                raw = json.loads(response.read().decode("utf-8"))
+            raw = self._post_with_retry(payload)
+        except GeminiUnavailable as error:
+            self.last_error = f"Gemini no respondió tras reintentos: {error}"[:500]
+            return None
+        try:
             content = raw["candidates"][0]["content"]["parts"][0]["text"]
             parsed = json.loads(content)
             translation = collapse_spaces(str(parsed.get("translation", ""))).strip()

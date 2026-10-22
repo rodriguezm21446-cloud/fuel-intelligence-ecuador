@@ -103,8 +103,7 @@ def build_price_sections(
     status = "fuente primaria" if candidate.source.trust >= 90 else "fuente corroborada"
     context = "\n".join(
         [
-            "VERIFICACIÓN Y CONTEXTO",
-            f"Estado: confirmado mediante {status}.",
+            f"CONTEXTO · confirmado mediante {status}",
             f"Detectado: {format_ecuador_time(detected_local)}",
             *((f"Enviado: {format_ecuador_time(sent_local)}",) if sent_local else ()),
             "Detalle numérico comprobado:",
@@ -157,13 +156,10 @@ def build_news_sections(
         status = "dos fuentes independientes"
     else:
         status = "fuente atribuida"
-    analysis = editorial.analysis if editorial else (
-        "El hecho se conserva atribuido a la fuente. No hay evidencia suficiente para presentar "
-        "una correlación de mercado como causa comprobada."
-    )
+    default_analysis = "Correlación de mercado aún sin evidencia."
+    analysis = editorial.analysis if editorial else default_analysis
     header = [
-        "VERIFICACIÓN Y CONTEXTO",
-        f"Estado: {status}.",
+        f"CONTEXTO · {status}",
         f"Detectado: {format_ecuador_time(detected_local)}",
     ]
     if sent_local:
@@ -217,8 +213,7 @@ def build_unconfirmed_price_sections(
     )
     context = "\n".join(
         [
-            "VERIFICACIÓN PENDIENTE",
-            "No publicar todavía como precio oficial.",
+            "PENDIENTE — No publicar todavía como precio oficial.",
             f"Detectado: {format_ecuador_time(detected_local)}",
             *((f"Enviado: {format_ecuador_time(sent_local)}",) if sent_local else ()),
             "Motivo: " + "; ".join(reasons[-3:]),
@@ -227,7 +222,6 @@ def build_unconfirmed_price_sections(
                 if changed
                 else []
             ),
-            "El sistema seguirá buscando la fuente primaria o una corrección.",
             f"Fuente del reporte: {candidate.source.name}",
             candidate.url,
         ]
@@ -432,8 +426,6 @@ def format_unconfirmed_price_alert(
             "",
             "Estado: no publicar todavía como precio oficial.",
             "Motivo: " + "; ".join(reasons[-3:]),
-            "Puedes publicarlo únicamente como reporte atribuido a la fuente, dejando claro que no es una ficha oficial.",
-            "Seguiremos buscando corroboración y correcciones del reporte. La ausencia de PDF no impide esta alerta.",
             "",
             "TEXTO PARA X:",
             trim_x(

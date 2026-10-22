@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS items (
     confidence INTEGER NOT NULL,
     reasons_json TEXT NOT NULL,
     relevance_score INTEGER NOT NULL,
-    notified_at TEXT
+    notified_at TEXT,
+    topic TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_items_detected ON items(detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_items_url ON items(canonical_url);
@@ -177,6 +178,9 @@ class Store:
             if name not in columns:
                 db.execute(f"ALTER TABLE fuel_prices ADD COLUMN {name} {definition}")
         db.execute("UPDATE fuel_prices SET verified_at = observed_at WHERE verified_at IS NULL")
+        item_columns = {row["name"] for row in db.execute("PRAGMA table_info(items)")}
+        if "topic" not in item_columns:
+            db.execute("ALTER TABLE items ADD COLUMN topic TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -213,15 +217,15 @@ class Store:
                 return True, "titular equivalente ya procesado"
         return False, "contenido nuevo"
 
-    def save_item(self, candidate: Candidate, decision: Decision) -> int:
+    def save_item(self, candidate: Candidate, decision: Decision, topic: str = "") -> int:
         with self.connect() as db:
             cursor = db.execute(
                 """
                 INSERT OR IGNORE INTO items (
                     content_hash, canonical_url, source_id, source_name, source_trust,
                     title, normalized_title, summary, published_at, detected_at,
-                    status, confidence, reasons_json, relevance_score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    status, confidence, reasons_json, relevance_score, topic
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     candidate.content_hash,
@@ -238,6 +242,7 @@ class Store:
                     decision.confidence,
                     json.dumps(decision.reasons, ensure_ascii=False),
                     decision.relevance_score,
+                    topic,
                 ),
             )
             item_id = int(cursor.lastrowid or 0)
@@ -269,6 +274,25 @@ class Store:
                 (cutoff, candidate.source.id),
             ).fetchall()
         return any(title_similarity(candidate.title, row["title"]) >= 0.52 for row in rows)
+
+    def pending_topic_notified(self, topic: str, detected: datetime, hours: int = 12) -> bool:
+        """True when a pending item on the same topic was already notified recently.
+
+        Operators set a hard cap: one warning per topic per window. Extra would-be
+        alerts for the same Episode are still stored, just not forwarded.
+        """
+        cutoff = (detected - timedelta(hours=hours)).isoformat()
+        with self.connect() as db:
+            row = db.execute(
+                """
+                SELECT 1 FROM items
+                WHERE status = 'pending' AND topic = ? AND notified_at IS NOT NULL
+                  AND COALESCE(detected_at, notified_at) >= ?
+                LIMIT 1
+                """,
+                (topic, cutoff),
+            ).fetchone()
+        return row is not None
 
     def mark_notified(self, item_id: int, when: datetime | None = None) -> None:
         if not item_id:

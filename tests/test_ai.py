@@ -2,13 +2,48 @@ from __future__ import annotations
 
 import io
 import json
+import urllib.error
 import unittest
 from unittest.mock import patch
 
 from fuelintel.ai import ANALYST_CONTRACT, EDITORIAL_GUARDRAILS, Editorial, GeminiEditor, extractive_summary, fact_check_summary
 
 
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "https://generativelanguage.googleapis.com", code, "high demand", {}, io.BytesIO(b"{}")
+    )
+
+
 class GeminiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._saved_delays = GeminiEditor.RETRY_DELAYS
+        GeminiEditor.RETRY_DELAYS = (0.0, 0.0, 0.0)
+
+    @classmethod
+    def tearDownClass(cls):
+        GeminiEditor.RETRY_DELAYS = cls._saved_delays
+
+    @patch("fuelintel.ai.urllib.request.urlopen")
+    def test_transient_503_is_retried_until_success(self, mocked):
+        side_effect_pages = [
+            _http_error(503),
+            _http_error(503),
+            io.BytesIO(json.dumps({
+                "candidates": [{"content": {"parts": [{"text": json.dumps({
+                    "analysis": "Hecho: Extra cuesta $3.21.",
+                    "x_text": "Extra: $3.21.",
+                    "doubts": "",
+                })}]}}]
+            }).encode("utf-8")),
+        ]
+        mocked.side_effect = side_effect_pages
+        editor = GeminiEditor("secret", "gemini-3.5-flash")
+        editorial = editor.review("Extra cuesta $3.21.", "Extra: $3.21.")
+        self.assertIsNotNone(editorial)
+        self.assertEqual(len(mocked.call_args_list), 3)
+
     def test_guardrail_rejects_automatic_brent_causality(self):
         self.assertIn("no demuestra por sí sola", EDITORIAL_GUARDRAILS)
         self.assertIn("documento oficial", EDITORIAL_GUARDRAILS)

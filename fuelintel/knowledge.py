@@ -121,6 +121,22 @@ def fact(key: str) -> MetricFact | None:
     return FACTS.get(key)
 
 
+# Stable Ecuador fuel-market rules. They are context for interpretation, never
+# quotations: no review may announce an Ecuador price change triggered by crude.
+ECUADOR_RULES: tuple[str, ...] = (
+    "Las vigencias de precios de combustibles en Ecuador son mensuales: del 12 al 11 del mes siguiente; cada ajuste lo anuncia una resolución oficial.",
+    "Los precios al consumidor están regulados con bandas y subsidios: un movimiento del crudo no implica un cambio en la bomba.",
+    "Extra y Ecopaís amparan un subsidio parcial estatal; el combustible Súper se publica como precio sugerido sin subsidio, y el diésel mantiene subsidio en varios sectores.",
+    "Un titular sobre caída o subida del crudo NO es un cambio de precios en Ecuador ni puede redactarse como tal.",
+    "Las cifras ofician con resolución y vigencia: una cifra de prensa o de un funcionario es atribución, no ficha oficial.",
+    "El crudo y los refinos explican presión sobre exportaciones e importación del país, no la tarifa final regulada.",
+)
+
+
+def ecuador_rules_text() -> str:
+    return "\n".join(f"- {line}" for line in ECUADOR_RULES)
+
+
 def within_band(key: str, value: float) -> bool:
     """A missing metric is never blocked; an unknown series is trusted as-is."""
     spec = FACTS.get(key)

@@ -9,7 +9,7 @@ from .ai import Editorial, GeminiEditor, extractive_summary, fact_check_summary
 from .calculations import price_change
 from .charts import generate_reported_price_chart
 from .extractors import extract_effective_period, extract_fuel_prices
-from .filters import evaluate_candidate, relevance_score
+from .filters import evaluate_candidate, pending_topic, relevance_score
 from .formatting import (
     TelegramSections,
     build_news_sections,
@@ -22,6 +22,7 @@ from .formatting import (
     format_unconfirmed_price_alert,
 )
 from .forecasting import forecast_next_price, format_forecast_message
+from .knowledge import ecuador_rules_text
 from .models import Candidate, Decision, PriceType, VerificationStatus
 from .sources import SourcePoller
 from .storage import Store
@@ -111,12 +112,18 @@ class Pipeline:
             pass
         return "\n".join(lines)
 
-    def _review(self, evidence: str, fallback_x: str, purpose: str, context: str = ""):
+    def _review(self, evidence: str, fallback_x: str, purpose: str, context: str = "", rules: str = ""):
         if not self.editor:
             return None
         if context:
             evidence = (
                 f"{evidence}\n\nDATOS INTERNOS VERIFICADOS (puedes citarlos; no inventes otros):\n{context}"
+            )
+        if rules:
+            evidence += (
+                "\n\nREGLAS FIJAS DEL DOMINIO (no citables; guían la interpretación. "
+                "Prohibido anunciar un cambio de precio en Ecuador por un movimiento del crudo):\n"
+                f"{rules}"
             )
         editorial = self.editor.review(evidence, fallback_x)
         self.store.record_ai_run(
@@ -310,7 +317,7 @@ class Pipeline:
                 decision.relevance_score,
             )
 
-        item_id = self.store.save_item(candidate, decision)
+        item_id = self.store.save_item(candidate, decision, pending_topic(candidate))
         if decision.status != VerificationStatus.VERIFIED:
             early_warning_sent = False
             if prices and decision.status == VerificationStatus.PENDING:
@@ -329,8 +336,15 @@ class Pipeline:
                         self.store.mark_source_conflict(item)
                 # Relevant price reports must wake the operator even when the
                 # primary PDF is missing. The wording explicitly blocks publication.
-                if allow_notify and candidate.source.trust >= 72 and initial_score >= 5 and (
-                    not period or (period.start - local_now.date()).days <= 2
+                # Only reports that carry real figures AND a declared vigencia
+                # qualify; a hard cap allows one watch ping per topic per window.
+                if (
+                    allow_notify
+                    and candidate.source.trust >= 72
+                    and initial_score >= 5
+                    and period
+                    and (period.start - local_now.date()).days <= 2
+                    and not self.store.pending_topic_notified(pending_topic(candidate), candidate.detected_at)
                 ):
                     early_warning_sent = self._send_sections(
                         item_id,
@@ -360,6 +374,7 @@ class Pipeline:
                 and candidate.raw_kind in {"link", "rss", "telegram", "x"}
                 and 72 <= candidate.source.trust < 90
                 and initial_score >= 12
+                and not self.store.pending_topic_notified(pending_topic(candidate), candidate.detected_at)
             ):
                 candidate = self._ensure_spanish(candidate)
                 editorial = None
@@ -368,7 +383,10 @@ class Pipeline:
                         "Traduce y resume esta alerta al español sin añadir hechos. Es una sola fuente aún no corroborada.\n"
                         f"Fuente: {candidate.source.name}\nTexto: {candidate.summary or candidate.title}"
                     )
-                    editorial = self._review(evidence, candidate.title, "early-news", self._analysis_context(candidate))
+                    editorial = self._review(
+            evidence, candidate.title, "early-news", self._analysis_context(candidate),
+            rules=self.store.get_meta("ecuador_rules") or ecuador_rules_text(),
+        )
                     editorial = self._ensure_summary_fact_checked(candidate, editorial)
                 if initial_score >= 18:
                     self._send_event_chart(item_id, candidate, local_now)
@@ -411,6 +429,7 @@ class Pipeline:
                 compose_x_prices(prices, changes, candidate.source.name),
                 "official-prices",
                 self._analysis_context(candidate),
+                rules=self.store.get_meta("ecuador_rules") or ecuador_rules_text(),
             )
             forecast_messages: list[str] = []
             for item in prices:
@@ -460,7 +479,10 @@ class Pipeline:
             candidate = self._ensure_spanish(candidate)
             fallback = format_news_alert(candidate, local_now, corroborated, sent_local=sent_local)
             fallback_x = fallback.split("TEXTO PARA X:\n", 1)[-1].split("\n\nFuente:", 1)[0]
-            editorial = self._review(fallback, fallback_x, "verified-news", self._analysis_context(candidate))
+            editorial = self._review(
+            fallback, fallback_x, "verified-news", self._analysis_context(candidate),
+            rules=self.store.get_meta("ecuador_rules") or ecuador_rules_text(),
+        )
             editorial = self._ensure_summary_fact_checked(candidate, editorial)
             sections = build_news_sections(candidate, local_now, corroborated, editorial, sent_local)
             if initial_score >= 18:
