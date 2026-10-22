@@ -20,6 +20,7 @@ from .knowledge import within_band
 from .market_math import percentage_change, validate_market_series
 from .quality import quarantine
 from .text import trim_x
+from . import yahoo as yahoo_lane
 
 
 ECUADOR_TZ = ZoneInfo("America/Guayaquil")
@@ -60,6 +61,9 @@ DNAV_XLS = {
 }
 DNAV_URL = "https://www.eia.gov/dnav/pet/hist_xls/"
 _MAX_CACHE_ROWS = 420
+# Attribution of the last load: used by the source line of every chart built
+# from this data, so nobody reads a Yahoo close as if it were EIA official data.
+_LAST_PROVIDERS: set[str] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +121,19 @@ def _history(series_id: str) -> list[tuple[str, float]]:
         if rows:
             return sorted(set(rows))
     return []
+
+
+def _history_yahoo(name: str) -> list[tuple[str, float]]:
+    """Fast keyless lane: Yahoo Finance v8 closes for the CME future.
+
+    Same series the bot already publishes (WTI/Brent/RBOB/ULSD), fresher than
+    the EIA envelope, still subject to validate + plausibility bands + bands of
+    knowledge before it is drawn.
+    """
+    symbol = yahoo_lane.FUTURES.get(name)
+    if not symbol:
+        return []
+    return yahoo_lane.fetch_daily_close(symbol)
 
 
 def _history_dnav(name: str, *, body: bytes | None = None) -> list[tuple[str, float]]:
@@ -215,9 +232,14 @@ def estimate_direction(rows: list[tuple[str, float]], horizon: int = 5) -> Marke
 
 
 def _source_line(
-    labels: list[str], provider: str = "U.S. Energy Information Administration (EIA)",
+    labels: list[str], provider: str | None = None,
     publication_note: str = "publicación oficial",
 ) -> str:
+    if provider is None:
+        # Attribution follows the lane that actually supplied the data.
+        provider = " · ".join(sorted(_LAST_PROVIDERS)) if _LAST_PROVIDERS else (
+            "U.S. Energy Information Administration (EIA)"
+        )
     if not labels:
         return f"Fuente: {provider}"
     period = labels[-1] if len(labels) == 1 else f"{labels[0]}–{labels[-1]}"
@@ -857,26 +879,31 @@ def _save_snapshot(series: dict[str, tuple[str, list[tuple[str, float]]]]) -> No
 
 
 def load_market_series() -> dict[str, list[tuple[str, float]]]:
-    """Resolve each official series with an ordered fallback ladder.
+    """Resolve each series with an ordered fallback ladder.
 
-    1. EIA API (cuando hay EIA_API_KEY) · 2. .xls oficial de eia.gov/dnav (sin
-    key) · 3. último snapshot sano en FUELINTEL_DATA_DIR. Nunca se rellenan
-    huecos con supuestos: una serie sin datos frescos decae al snapshot, y si
-    tampoco hay snapshot no se dibuja.
+    1. Yahoo Finance v8 (cierres CME, sin key) · 2. EIA API (cuando hay
+    EIA_API_KEY) · 3. .xls oficial de eia.gov/dnav (sin key) · 4. último
+    snapshot sano en FUELINTEL_DATA_DIR. Nunca se rellenan huecos con
+    supuestos: una serie sin datos frescos decae al snapshot, y si tampoco
+    hay snapshot no se dibuja. La atribución de la línea de fuente registra
+    qué carril alimentó cada serie publicada.
     """
     raw_series: dict[str, list[tuple[str, float]]] = {}
     snapshot = _load_snapshot()
     snapshot_changed = False
     now_iso = datetime.now(ECUADOR_TZ).isoformat(timespec="seconds")
+    yahoo_names: set[str] = set()
     for name, series_id in EIA_SPOT_SERIES.items():
         rows: list[tuple[str, float]] = []
         from_cache = False
-        for resolver in (partial(_history, series_id), partial(_history_dnav, name)):
+        yahoo_hit = False
+        for resolver in (partial(_history_yahoo, name), partial(_history, series_id), partial(_history_dnav, name)):
             try:
                 rows = resolver()  # type: ignore[assignment]
             except Exception:
                 rows = []
             if rows:
+                yahoo_hit = resolver.func is _history_yahoo
                 break
         if not rows and name in snapshot:
             rows, from_cache = snapshot[name][1], True
@@ -889,11 +916,19 @@ def load_market_series() -> dict[str, list[tuple[str, float]]]:
         if not _plausible_market_series(name, rows):
             continue
         raw_series[name] = rows
+        if yahoo_hit:
+            yahoo_names.add(name)
         if not from_cache:
             snapshot[name] = (now_iso, rows[-_MAX_CACHE_ROWS:])
             snapshot_changed = True
     if snapshot_changed:
         _save_snapshot(snapshot)
+    published = set(raw_series)
+    fresh = {"Yahoo Finance (futuros CME)"} if yahoo_names else set()
+    if yahoo_names and yahoo_names != published:
+        fresh = {"Yahoo Finance (futuros CME)", "U.S. EIA"}
+    _LAST_PROVIDERS.clear()
+    _LAST_PROVIDERS.update(fresh)
     return raw_series
 
 

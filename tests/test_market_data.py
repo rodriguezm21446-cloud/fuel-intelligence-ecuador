@@ -33,6 +33,7 @@ class DnavHistoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with patch.dict(os.environ, {"FUELINTEL_DATA_DIR": folder}):
                 with patch("fuelintel.market_intelligence._history", return_value=[]), \
+                     patch("fuelintel.market_intelligence._history_yahoo", return_value=[]), \
                      patch(
                         "fuelintel.market_intelligence._history_dnav",
                         side_effect=lambda name, **kw: _history_dnav(name, body=FIXTURE.read_bytes()),
@@ -53,6 +54,7 @@ class DnavHistoryTests(unittest.TestCase):
                 self.assertGreaterEqual(len(cached), 30)
                 _save_snapshot({"WTI": (datetime(2026, 1, 1).isoformat(), cached)})
                 with patch("fuelintel.market_intelligence._history", side_effect=RuntimeError), \
+                     patch("fuelintel.market_intelligence._history_yahoo", side_effect=RuntimeError), \
                      patch("fuelintel.market_intelligence._history_dnav", side_effect=RuntimeError):
                     series = load_market_series()
         self.assertEqual(series["WTI"], cached[-420:])
@@ -61,6 +63,7 @@ class DnavHistoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with patch.dict(os.environ, {"FUELINTEL_DATA_DIR": folder}):
                 with patch("fuelintel.market_intelligence._history", side_effect=RuntimeError), \
+                     patch("fuelintel.market_intelligence._history_yahoo", side_effect=RuntimeError), \
                      patch("fuelintel.market_intelligence._history_dnav", side_effect=RuntimeError):
                     series = load_market_series()
         self.assertEqual(series, {})
