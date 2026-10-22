@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+from functools import partial
 from pathlib import Path
 from statistics import median
 from zoneinfo import ZoneInfo
@@ -36,15 +37,29 @@ RETAIL_COLORS = {
     "Gasolina premium": "#D8D5CE",
     "Diésel": "#6C8FB3",
 }
-# Cotizaciones oficiales de spot (EIA, API legacy v1). Nada de agregadores
-# privados: las series son las mismas que publica eia.gov y pasan por las
-# bandas sane de knowledge.py antes de dibujarse.
+# Cotizaciones oficiales de spot (EIA). La ruta principal es la API legacy v1
+# (requiere EIA_API_KEY); la segunda vía es el histórico oficial en eia.gov/dnav
+# (hist_xls, archivos .xls de ~0.5 MB SIN key). Nada de agregadores privados:
+# las series son las mismas que publica eia.gov y pasan por las bandas sane de
+# knowledge.py antes de dibujarse.
 EIA_SPOT_SERIES = {
     "WTI": "PET.RWTC.D",          # Cushing OK WTI Spot (USD/barril, diario)
     "Brent": "PET.RBRTE.D",       # Europe Brent Spot FOB (USD/barril, diario)
-    "RBOB": "EER_EPMR_PI_Y35NY_DPG.D",      # NY Harbor gasolina regular spot (USD/gal)
-    "ULSD": "EER_EPD2DXL0_PF4_Y35NY_DPG.D", # NY Harbor diésel ULSD spot (USD/gal)
+    "RBOB": "EER_EPMRU_PF4_Y35NY_DPG.D",      # NY Harbor gasolina regular spot (USD/gal)
+    "ULSD": "EER_EPD2DXL0_PF4_Y35NY_DPG.D",   # NY Harbor diésel ULSD spot (USD/gal)
 }
+
+# Históricos oficiales keyless de eia.gov/dnav: un .xls por serie con la misma
+# serie que la API (los ids de dnav son los mismos menos el prefijo PET.).
+# La ruta RBOB antigua (EER_EPMR_PI_Y35NY_DPG) quedó descontinuada en 2019.
+DNAV_XLS = {
+    "WTI": "RWTCd.xls",
+    "Brent": "RBRTEd.xls",
+    "RBOB": "EER_EPMRU_PF4_Y35NY_DPGd.xls",
+    "ULSD": "EER_EPD2DXL0_PF4_Y35NY_DPGd.xls",
+}
+DNAV_URL = "https://www.eia.gov/dnav/pet/hist_xls/"
+_MAX_CACHE_ROWS = 420
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,24 +87,71 @@ def _history(series_id: str) -> list[tuple[str, float]]:
     api_key = os.getenv("EIA_API_KEY", "").strip()
     if not api_key:
         return []
-    url = "https://api.eia.gov/series/?" + urllib.parse.urlencode({
-        "api_key": api_key,
-        "series_id": series_id,
-    })
-    request = urllib.request.Request(url, headers={"User-Agent": "FuelIntelligenceEcuador/0.4"})
-    with urllib.request.urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    rows: list[tuple[str, float]] = []
-    for entry in payload.get("series", [{}])[0].get("data", []):
-        if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+    # EIA v1 expects full ids ("PET.RWTC.D"); dnav-style short ids work in
+    # modern EIA pages, so try both spellings before giving up.
+    candidate_ids = [series_id]
+    if not series_id.startswith("PET."):
+        candidate_ids.append(f"PET.{series_id}")
+    for effective_id in candidate_ids:
+        url = "https://api.eia.gov/series/?" + urllib.parse.urlencode({
+            "api_key": api_key,
+            "series_id": effective_id,
+        })
+        request = urllib.request.Request(url, headers={"User-Agent": "FuelIntelligenceEcuador/0.4"})
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
             continue
-        day, raw_value = str(entry[0]), entry[1]
+        rows: list[tuple[str, float]] = []
+        for entry in payload.get("series", [{}])[0].get("data", []):
+            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                continue
+            day, raw_value = str(entry[0]), entry[1]
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if len(day) == 8 and math.isfinite(value) and value > 0:
+                rows.append((f"{day[:4]}-{day[4:6]}-{day[6:8]}", value))
+        if rows:
+            return sorted(set(rows))
+    return []
+
+
+def _history_dnav(name: str, *, body: bytes | None = None) -> list[tuple[str, float]]:
+    """Keyless official fallback: the .xls history that eia.gov/dnav publishes.
+
+    Downloading the ~0.5 MB workbook from eia.gov needs no API key, so the
+    market charts do not depend on a single secret. Only observed dates with a
+    finite positive value are returned; downstream band validation still gates
+    what gets drawn. `body` accepts pre-fetched workbook bytes (tests).
+    """
+    try:
+        import xlrd
+    except ImportError:
+        raise RuntimeError("xlrd no está instalado: no se puede leer el histórico de eia.gov/dnav")
+    if body is None:
+        import urllib.request
+        request = urllib.request.Request(
+            DNAV_URL + DNAV_XLS[name], headers={"User-Agent": "FuelIntelligenceEcuador/0.4"}
+        )
+        with urllib.request.urlopen(request, timeout=25) as response:
+            body = response.read()
+    book = xlrd.open_workbook(file_contents=body)
+    sheet = book.sheet_by_name("Data 1")
+    epoch = datetime(1899, 12, 30)
+    rows: list[tuple[str, float]] = []
+    for index in range(3, sheet.nrows):
+        serial, raw_value = sheet.cell_value(index, 0), sheet.cell_value(index, 1)
         try:
             value = float(raw_value)
         except (TypeError, ValueError):
             continue
-        if len(day) == 8 and math.isfinite(value) and value > 0:
-            rows.append((f"{day[:4]}-{day[4:6]}-{day[6:8]}", value))
+        if not (serial and math.isfinite(value) and value > 0):
+            continue
+        day = (epoch + timedelta(days=int(serial))).date().isoformat()
+        rows.append((day, value))
     return sorted(set(rows))
 
 
@@ -748,16 +810,85 @@ def build_market_briefing(raw_series: dict[str, list[tuple[str, float]]], relate
     return "\n\n".join(sections.messages())
 
 
-def load_market_series() -> dict[str, list[tuple[str, float]]]:
-    raw_series: dict[str, list[tuple[str, float]]] = {}
-    for name, series_id in EIA_SPOT_SERIES.items():
+def _snapshot_path() -> Path:
+    return Path(os.getenv("FUELINTEL_DATA_DIR", "./data")) / "market_snapshot.json"
+
+
+def _load_snapshot() -> dict[str, tuple[str, list[tuple[str, float]]]]:
+    """Last successful fetch per series: (fetched_local_iso, rows).
+
+    Lives inside FUELINTEL_DATA_DIR, which the workflow restores from the
+    fuelintel-state cache, so the keyless fallback survives across runs and a
+    provider outage degrades to the last honest snapshot instead of blank charts.
+    """
+    try:
+        payload = json.loads(_snapshot_path().read_text("utf-8"))
+    except Exception:
+        return {}
+    series: dict[str, tuple[str, list[tuple[str, float]]]] = {}
+    if not isinstance(payload, dict):
+        return series
+    for name, block in payload.items():
         try:
-            rows = _history(series_id)
-            validate_market_series(name, rows)
-            if _plausible_market_series(name, rows):
-                raw_series[name] = rows
+            rows = [(str(d), float(v)) for d, v in block["rows"]]
+            fetched = str(block.get("fetched", ""))
+            if rows:
+                series[name] = (fetched, sorted(set(rows)))
         except Exception:
             continue
+    return series
+
+
+def _save_snapshot(series: dict[str, tuple[str, list[tuple[str, float]]]]) -> None:
+    payload = {}
+    for name, (fetched, rows) in series.items():
+        payload[name] = {"fetched": fetched, "rows": [list(row) for row in rows[-_MAX_CACHE_ROWS:]]}
+    try:
+        path = _snapshot_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False), "utf-8")
+    except Exception:
+        return
+
+
+def load_market_series() -> dict[str, list[tuple[str, float]]]:
+    """Resolve each official series with an ordered fallback ladder.
+
+    1. EIA API (cuando hay EIA_API_KEY) · 2. .xls oficial de eia.gov/dnav (sin
+    key) · 3. último snapshot sano en FUELINTEL_DATA_DIR. Nunca se rellenan
+    huecos con supuestos: una serie sin datos frescos decae al snapshot, y si
+    tampoco hay snapshot no se dibuja.
+    """
+    raw_series: dict[str, list[tuple[str, float]]] = {}
+    snapshot = _load_snapshot()
+    snapshot_changed = False
+    now_iso = datetime.now(ECUADOR_TZ).isoformat(timespec="seconds")
+    for name, series_id in EIA_SPOT_SERIES.items():
+        rows: list[tuple[str, float]] = []
+        from_cache = False
+        for resolver in (partial(_history, series_id), partial(_history_dnav, name)):
+            try:
+                rows = resolver()  # type: ignore[assignment]
+            except Exception:
+                rows = []
+            if rows:
+                break
+        if not rows and name in snapshot:
+            rows, from_cache = snapshot[name][1], True
+        if not rows:
+            continue
+        try:
+            validate_market_series(name, rows)
+        except Exception:
+            continue
+        if not _plausible_market_series(name, rows):
+            continue
+        raw_series[name] = rows
+        if not from_cache:
+            snapshot[name] = (now_iso, rows[-_MAX_CACHE_ROWS:])
+            snapshot_changed = True
+    if snapshot_changed:
+        _save_snapshot(snapshot)
     return raw_series
 
 
