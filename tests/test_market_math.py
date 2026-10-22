@@ -47,6 +47,47 @@ class MarketMathTests(unittest.TestCase):
         with self.assertRaises(DataIntegrityError):
             validate_chart_payload(payload)
 
+    def test_price_type_requires_subtitle_statement(self):
+        payload = {
+            "title": "Prueba",
+            "subtitle": "Vigencia 12/10–11/11 · USD por galón",
+            "priceType": "TERMINAL",
+            "labels": ["A"],
+            "datasets": [{"label": "Extra", "color": "#000", "values": [2.9]}],
+            "displayDecimals": 3,
+        }
+        with self.assertRaises(DataIntegrityError):
+            validate_chart_payload(payload)
+        payload["subtitle"] = "Vigencia 12/10–11/11 · precio en terminal · USD por galón"
+        validate_chart_payload(payload)
+
+    def test_price_type_mixing_is_rejected(self):
+        payload = {
+            "title": "Prueba",
+            "subtitle": "Precio al público · USD por galón",
+            "priceType": "PUBLICO",
+            "labels": ["A"],
+            "datasets": [
+                {"label": "Extra", "color": "#000", "values": [3.17]},
+                {"label": "Terminal", "color": "#111", "values": [2.95], "priceType": "TERMINAL"},
+            ],
+            "displayDecimals": 3,
+        }
+        with self.assertRaises(DataIntegrityError):
+            validate_chart_payload(payload)
+
+    def test_unknown_price_type_is_rejected(self):
+        payload = {
+            "title": "Prueba",
+            "subtitle": "Whatever",
+            "priceType": "SOCIAL",
+            "labels": ["A"],
+            "datasets": [{"label": "Extra", "color": "#000", "values": [3.17]}],
+            "displayDecimals": 3,
+        }
+        with self.assertRaises(DataIntegrityError):
+            validate_chart_payload(payload)
+
 
 if __name__ == "__main__":
     unittest.main()

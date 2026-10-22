@@ -99,7 +99,7 @@ class ChartTests(unittest.TestCase):
             payload = build_national_payload(store)
             self.assertEqual(payload["title"], "Precio vigente de combustible en Ecuador")
             self.assertEqual(payload["datasets"][0]["color"], "#1F6E8C")
-            self.assertEqual(payload["theme"], "editorial")
+            self.assertEqual(payload["priceType"], "PUBLICO")
             self.assertEqual(payload["chartKind"], "step")
             self.assertIn("Chart", build_chart_html(payload))
             destination = root / "dashboard.png"
@@ -175,8 +175,8 @@ class ChartTests(unittest.TestCase):
         self.assertTrue(payload["zeroBaseline"])
         self.assertEqual(payload["annotations"], [])
         html = build_chart_html(payload)
-        self.assertIn("['Subida', '#71866C']", html)
-        self.assertIn("['Bajada', '#9A5E57']", html)
+        self.assertIn("colorsBySign ? ds.values.map(v => Number(v) >= 0 ? '#71866C' : '#9A5E57')", html)
+        self.assertNotIn('id="legend"', html)
         self.assertNotIn('"sin cambio"', html)
 
     def test_prediction_is_withheld_without_enough_history(self):

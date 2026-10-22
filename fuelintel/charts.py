@@ -321,6 +321,7 @@ def build_national_payload(store: Store, range_limit: int | None = 12) -> dict |
     return {
         "title": title,
         "subtitle": f"{period_description} · {type_label} · USD por galón",
+        "priceType": selected_type,
         "context": context_bullets[:2],
         "labels": [datetime.fromisoformat(day).strftime("%d/%m/%Y") for day in dates],
         "datasets": datasets,
@@ -332,7 +333,6 @@ def build_national_payload(store: Store, range_limit: int | None = 12) -> dict |
         "insight": "",
         "source": f"Fuente: {source_medium} de {sources} · Periodo: {exact_period} · {own_data_label()}",
         "credit": own_data_label(),
-        "theme": "editorial",
         "displayDecimals": 2,
     }
 
@@ -398,7 +398,8 @@ def generate_reported_price_chart(
     validity = f" · posible vigencia {period.start:%d/%m/%Y}–{period.end:%d/%m/%Y}" if period else ""
     payload = {
         "title": "Reporte preliminar de precios de combustible",
-        "subtitle": f"Información publicada por un medio{validity} · USD por galón",
+        "subtitle": f"Información publicada por un medio{validity} · precio al público en estación · USD por galón",
+        "priceType": "PUBLICO",
         "labels": ["Anterior confirmado", "Reporte reciente"],
         "datasets": datasets,
         "annotations": [],
@@ -411,7 +412,6 @@ def generate_reported_price_chart(
             if period else f"Fuente: {source_name} · Fecha: {now_local:%d/%m/%Y}"
         ),
         "credit": own_data_label(),
-        "theme": "dark",
         "displayDecimals": 3,
     }
     return render_chart(payload, destination)

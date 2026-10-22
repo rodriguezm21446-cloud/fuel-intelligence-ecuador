@@ -227,6 +227,7 @@ def _source_line(
 def _series_payload(
     raw_series: dict[str, list[tuple[str, float]]], *, title: str, subtitle: str,
     insight: str, decimals: int, kind: str = "line", prefix: str = "$", suffix: str = "",
+    price_type: str | None = None,
 ) -> dict | None:
     series = {name: rows[-90:] for name, rows in raw_series.items() if len(rows) >= 2}
     if not series:
@@ -242,6 +243,7 @@ def _series_payload(
     return {
         "title": title,
         "subtitle": subtitle,
+        "priceType": price_type,
         "labels": rendered_labels,
         "datasets": datasets,
         "annotations": [],
@@ -274,6 +276,7 @@ def build_market_payload(raw_series: dict[str, list[tuple[str, float]]]) -> dict
         raw_series, title="Petróleo: WTI y Brent",
         subtitle="Últimas 90 sesiones · cierres diarios observados · USD por barril",
         insight=insight, decimals=2, kind="line",
+        price_type="MERCADO",
     )
 
 
@@ -282,7 +285,7 @@ def build_refined_products_payload(raw_series: dict[str, list[tuple[str, float]]
         raw_series, title="Gasolina y diésel mayoristas de EE. UU.",
         subtitle="Últimas 90 sesiones · futuros RBOB y ULSD · USD por galón",
         insight="Últimos cierres observados de gasolina RBOB y diésel ULSD.",
-        decimals=3, kind="line",
+        decimals=3, kind="line", price_type="MERCADO",
     )
 
 
@@ -332,7 +335,7 @@ def build_volatility_payload(raw_series: dict[str, list[tuple[str, float]]]) -> 
         volatility, title="Volatilidad realizada del petróleo",
         subtitle="Ventana móvil de 20 sesiones · anualizada · porcentaje",
         insight="Variación anualizada calculada con los últimos 20 cierres.",
-        decimals=1, kind="area", prefix="", suffix="%",
+        decimals=1, kind="area", prefix="", suffix="%", price_type="MERCADO",
     )
 
 
@@ -352,6 +355,7 @@ def build_weekly_moves_payload(raw_series: dict[str, list[tuple[str, float]]]) -
     return {
         "title": "Movimiento semanal de energía",
         "subtitle": "Cambio porcentual en las últimas cinco sesiones · bases comparables",
+        "priceType": "MERCADO",
         "labels": names,
         "datasets": [{"label": "Variación", "color": "#8D887F", "values": values, "pending": False, "colorsBySign": True}],
         "annotations": [],

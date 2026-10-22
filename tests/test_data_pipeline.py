@@ -96,23 +96,25 @@ class DataArchitectureTests(unittest.TestCase):
             "credit": "Cálculos y visualización: @PreciosCombustibleEC",
         }
         html = build_chart_html(payload)
-        self.assertIn("font-family: Inter, Arial, sans-serif", html)
-        self.assertIn("color: #8CC8FF", html)
+        self.assertIn('font-family: "Goldman Sans", Inter, Arial, sans-serif', html)
+        self.assertIn("color: #E87722", html)
+        self.assertIn("@font-face {font-family: 'Goldman Sans'; src: url('https://cdn.gs.com/fonts/goldman-sans/v1/goldman-sans-regular.woff2')", html)
         self.assertNotIn('id="insight"', html)
         self.assertNotIn('id="credit"', html)
-        self.assertIn("position: EDITORIAL ? 'left' : 'right'", html)
+        self.assertIn("position: 'left'", html)
         self.assertIn("align: 'inner'", html)
         # The right-side axis now reserves its own width instead of mirroring
         # labels into the plot; this prevents first/last tick clipping.
         self.assertIn("mirror: false", html)
         self.assertIn("grid: { display: false }", html)
-        self.assertIn("margin: 0 110px 0 100px", html)
+        self.assertIn("margin: 0 150px 0 76px", html)
         self.assertIn("right: EDITORIAL ? 140 : 96", html)
         self.assertIn("left: EDITORIAL ? 100 : 90", html)
         self.assertIn("overflow: visible", html)
         self.assertIn("Number.isInteger(P.displayDecimals)", html)
         self.assertGreaterEqual(html.count("formatValue("), 3)
         self.assertIn("ctx.moveTo(x, area.top); ctx.lineTo(x, area.bottom)", html)
+        self.assertNotIn("font-family: Inter", html)
         for forbidden in ("Courier", "Consolas", "monospace", "linear-gradient", "box-shadow", "text-shadow"):
             self.assertNotIn(forbidden, html)
 

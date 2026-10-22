@@ -80,6 +80,25 @@ def validate_chart_payload(payload: dict, *, heatmap: bool = False) -> None:
         raise DataIntegrityError("el gráfico no contiene fechas o categorías")
     if not isinstance(datasets, list) or not datasets:
         raise DataIntegrityError("el gráfico no contiene series")
+
+    # Un solo tipo de precio por gráfico: nunca mezclar bomba con terminal.
+    price_type = payload.get("priceType")
+    if price_type is not None:
+        required_phrases = {
+            "PUBLICO": ("público", "publico"),
+            "TERMINAL": ("terminal",),
+            "REFERENCIAL": ("referencial",),
+            "MERCADO": ("mercado", "futuros", "sesiones"),
+        }
+        phrases = required_phrases.get(price_type)
+        if phrases is None:
+            raise DataIntegrityError("tipo de precio desconocido en el gráfico")
+        subtitle = str(payload.get("subtitle", "")).lower()
+        if not any(phrase in subtitle for phrase in phrases):
+            raise DataIntegrityError(f"el subtítulo debe declarar el tipo de precio ({price_type})")
+        declared = {price_type if dataset.get("priceType") is None else dataset.get("priceType") for dataset in datasets}
+        if len(declared) > 1:
+            raise DataIntegrityError("series con tipos de precio mezclados")
     decimals = payload.get("displayDecimals", 3)
     if not isinstance(decimals, int) or not 0 <= decimals <= 6:
         raise DataIntegrityError("precisión decimal fuera de rango")

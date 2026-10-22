@@ -68,7 +68,7 @@ jobs:
       GEMINI_MODEL: gemini-3.5-flash
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      FUELINTEL_CHART_REVISION: "9"
+      FUELINTEL_CHART_REVISION: "10"
       FUELINTEL_BRAND_NAME: "@combustibleEc"
       FUELINTEL_EVENT_SOURCE_ID: ${{ inputs.source_id }}
       FUELINTEL_EVENT_URL: ${{ inputs.event_url }}
