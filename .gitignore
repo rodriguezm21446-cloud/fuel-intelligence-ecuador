@@ -4,6 +4,7 @@
 .playwright-browsers/
 *.egg-info/
 __pycache__/
+data/market_snapshot.json
 *.py[cod]
 .pytest_cache/
 node_modules/
