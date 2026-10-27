@@ -160,8 +160,10 @@ def build_news_sections(
     analysis = editorial.analysis if editorial else default_analysis
     header = [
         f"CONTEXTO · {status}",
-        f"Detectado: {format_ecuador_time(detected_local)}",
     ]
+    if getattr(candidate, "translation_pending", False):
+        header.append("IDIOMA · sin traducir, texto original citado entre «»")
+    header.append(f"Detectado: {format_ecuador_time(detected_local)}")
     if sent_local:
         header.append(f"Enviado: {format_ecuador_time(sent_local)}")
     optional = [f"Qué sabemos: {analysis}", f"Canal hacia Ecuador: {market_impact_channel(candidate)}"]

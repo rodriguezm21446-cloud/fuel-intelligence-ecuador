@@ -60,6 +60,9 @@ class Candidate:
     detected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     content_hash: str = ""
     raw_kind: str = "html"
+    # Set when no translation engine could render a foreign title or body. The
+    # delivery labels the alert instead of publishing foreign prose silently.
+    translation_pending: bool = False
 
 
 @dataclass(frozen=True, slots=True)
