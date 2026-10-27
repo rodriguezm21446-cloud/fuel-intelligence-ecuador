@@ -27,8 +27,14 @@ from .models import Candidate, Decision, PriceType, VerificationStatus
 from .sources import SourcePoller
 from .storage import Store
 from .telegram import TelegramNotifier
-from .text import canonical_url
+from .text import canonical_url, trim_x
 from .translate import looks_spanish, translate_to_spanish
+
+
+TRANSLATION_PENDING_NOTICE = (
+    "TRADUCCIÓN NO DISPONIBLE · el texto de origen está en otro idioma y ningún motor "
+    "respondió. Titular original entre «»; abre el enlace para leer la nota completa."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,32 +145,45 @@ class Pipeline:
 
         Title and body are checked separately: a Spanish headline over an English
         quotation must not hide an untranslated body.
+
+        When no engine produces a translation the original wording of a *short*
+        field is preserved (a headline is data: the operator must be able to
+        recognise the story), but the delivery carries an explicit
+        ``translation_pending`` flag so the alert is labelled as untranslated
+        instead of silently publishing foreign prose or replacing the headline
+        with a generic notice.
         """
         body_text = candidate.summary or candidate.body or ""
         title_needs = not looks_spanish(candidate.title or "")
         body_needs = not looks_spanish(body_text)
         if not (title_needs or body_needs):
             return candidate
-        title = translate_to_spanish(candidate.title, self.editor) if title_needs else None
-        body = translate_to_spanish(body_text, self.editor) if body_needs else None
+        # The public endpoint is opt-out so an offline or test environment never
+        # depends on an external service being reachable.
+        allow_public = getattr(self.editor, "allow_public_translation", True)
+        title = translate_to_spanish(candidate.title, self.editor, allow_public=allow_public) if title_needs else None
+        body = translate_to_spanish(body_text, self.editor, allow_public=allow_public) if body_needs else None
         translated = bool((title and title.translated) or (body and body.translated))
+        pending = bool((title_needs and not (title and title.translated)) or (body_needs and not (body and body.translated)))
         self.store.record_pipeline_stage(
             "WF_05_TRANSLATOR",
-            "translated" if translated else "untranslated",
-            f"title={title.engine if title else 'es'} body={body.engine if body else 'es'}",
+            "translated" if translated and not pending else ("partial" if translated else "untranslated"),
+            f"title={(title.engine if title else 'es')} body={(body.engine if body else 'es')}",
         )
-        # Never surface a foreign original: if no engine produced a translation,
-        # keep a Spanish notice and the link instead of the raw text.
         new_title = candidate.title
         if title_needs:
-            new_title = title.text if title.translated else "Noticia en otro idioma; traducción no disponible"
+            if title.translated:
+                new_title = title.text
+            else:
+                # Keep the foreign headline recognisable, quoted, never as prose.
+                new_title = trim_x(f"«{candidate.title}»", 180)
         new_summary = candidate.summary
         if body_needs:
-            new_summary = body.text if body.translated else (
-                "El texto original está en otro idioma. Abre el enlace para leerlo; "
-                "la traducción automática no está disponible en este momento."
-            )
-        return replace(candidate, title=new_title, summary=new_summary)
+            if body.translated:
+                new_summary = body.text
+            else:
+                new_summary = TRANSLATION_PENDING_NOTICE
+        return replace(candidate, title=new_title, summary=new_summary, translation_pending=pending)
 
     def _ensure_summary_fact_checked(self, candidate: Candidate, editorial: Editorial | None) -> Editorial | None:
         """Verifica que el resumen no invente datos; si falla, usa resumen extractivo de la fuente."""
@@ -352,8 +371,6 @@ class Pipeline:
                             candidate, prices, local_now, decision.reasons, sent_local, media_changes
                         ),
                     )
-                    if early_warning_sent:
-                        self.store.mark_notified(item_id)
                     chart_prices = [item for item in prices if item.period and not item.source_conflict and item.price_type != PriceType.UNKNOWN]
                     if self.chart_generator is not None and chart_prices:
                         provisional_path = Path(self.store.path).parent / "charts" / f"reported-{local_now:%Y%m%d-%H%M%S}.png"
@@ -384,9 +401,9 @@ class Pipeline:
                         f"Fuente: {candidate.source.name}\nTexto: {candidate.summary or candidate.title}"
                     )
                     editorial = self._review(
-            evidence, candidate.title, "early-news", self._analysis_context(candidate),
-            rules=self.store.get_meta("ecuador_rules") or ecuador_rules_text(),
-        )
+                        evidence, candidate.title, "early-news", self._analysis_context(candidate),
+                        rules=self.store.get_meta("ecuador_rules") or ecuador_rules_text(),
+                    )
                     editorial = self._ensure_summary_fact_checked(candidate, editorial)
                 if initial_score >= 18:
                     self._send_event_chart(item_id, candidate, local_now)
@@ -396,6 +413,10 @@ class Pipeline:
                         candidate, local_now, False, editorial, sent_local, confirmed=False
                     ),
                 )
+            # One ownership point for "delivered": the previous version marked
+            # the item notified twice in this branch, so a crash between the two
+            # writes left notified_at NULL with the text already delivered and the
+            # next run sent the same squawk again.
             if early_warning_sent:
                 self.store.mark_notified(item_id)
             return ProcessResult(decision.status, early_warning_sent, item_id, "; ".join(decision.reasons))
@@ -480,9 +501,9 @@ class Pipeline:
             fallback = format_news_alert(candidate, local_now, corroborated, sent_local=sent_local)
             fallback_x = fallback.split("TEXTO PARA X:\n", 1)[-1].split("\n\nFuente:", 1)[0]
             editorial = self._review(
-            fallback, fallback_x, "verified-news", self._analysis_context(candidate),
-            rules=self.store.get_meta("ecuador_rules") or ecuador_rules_text(),
-        )
+                fallback, fallback_x, "verified-news", self._analysis_context(candidate),
+                rules=self.store.get_meta("ecuador_rules") or ecuador_rules_text(),
+            )
             editorial = self._ensure_summary_fact_checked(candidate, editorial)
             sections = build_news_sections(candidate, local_now, corroborated, editorial, sent_local)
             if initial_score >= 18:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -10,7 +9,7 @@ from typing import Iterator
 from decimal import Decimal
 
 from .models import Candidate, Decision, FuelPrice, PriceType
-from .text import canonical_url, fold, title_similarity
+from .text import canonical_url, fold, same_announcement
 
 
 SCHEMA = """
@@ -211,10 +210,9 @@ class Store:
         for row in rows:
             if row["status"] == "pending" or candidate.source.trust > row["source_trust"]:
                 continue
-            if re.findall(r"\d+(?:[.,]\d+)?", candidate.title) != re.findall(r"\d+(?:[.,]\d+)?", row["title"]):
+            if not same_announcement(candidate.title, row["title"], similarity_threshold):
                 continue
-            if title_similarity(candidate.title, row["title"]) >= similarity_threshold:
-                return True, "titular equivalente ya procesado"
+            return True, "anuncio equivalente ya procesado"
         return False, "contenido nuevo"
 
     def save_item(self, candidate: Candidate, decision: Decision, topic: str = "") -> int:

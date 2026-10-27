@@ -14,6 +14,7 @@ class _SpyEditor:
     enabled = True
     model = "spy"
     last_error = ""
+    allow_public_translation = False
 
     def __init__(self):
         self.calls: list[str] = []
@@ -30,6 +31,7 @@ class _DeadEditor:
     enabled = True
     model = "dead"
     last_error = ""
+    allow_public_translation = False
 
     def translate(self, text, target_language="es"):
         return None
@@ -42,6 +44,7 @@ class _InventingEditor:
     enabled = True
     model = "inventing"
     last_error = ""
+    allow_public_translation = False
 
     def translate(self, text, target_language="es"):
         return None
@@ -91,9 +94,56 @@ class TranslateToSpanishTests(unittest.TestCase):
         self.assertEqual(result.engine, "gemini")
 
     def test_no_engine_marks_text_untranslated(self):
-        result = translate_to_spanish("Diesel is up", None)
+        result = translate_to_spanish("Diesel is up", None, allow_public=False)
         self.assertFalse(result.translated)
         self.assertEqual(result.engine, "none")
+        # The original wording is preserved so the caller can quote it and the
+        # operator can still recognise the story.
+        self.assertEqual(result.text, "Diesel is up")
+        self.assertEqual(result.original, "Diesel is up")
+
+    def test_public_endpoint_is_used_only_when_no_editor(self):
+        class _Dead:
+            enabled = True
+
+            def translate(self, text, target_language="es"):
+                return None
+
+        # A dead editor must not cost the extra network hop when nothing else
+        # is configured: the public lane still gets a chance.
+        result = translate_to_spanish("Diesel is up", _Dead(), allow_public=False)
+        self.assertEqual(result.engine, "none")
+
+
+class LanguageDetectionTests(unittest.TestCase):
+    """Short English headlines used to be classified as Spanish and sent raw."""
+
+    def test_short_english_headline_is_not_spanish(self):
+        self.assertFalse(looks_spanish("Oil prices rise after a supply cut"))
+
+    def test_english_headline_with_spanish_looking_function_words(self):
+        # "diesel" was in the Spanish hint set while also being an English
+        # word, so it scored 1-0 against English and the tie was resolved as
+        # Spanish.  Shared spellings must not count as Spanish evidence.
+        self.assertFalse(looks_spanish("The diesel of the refinery is down"))
+
+    def test_romanian_headline_is_not_spanish(self):
+        self.assertFalse(looks_spanish("Prețul motorinei scade pentru șoferi"))
+
+    def test_long_spanish_sentence_is_still_spanish(self):
+        self.assertTrue(looks_spanish("Las gasolinas Extra y Ecopais bajan de precio"))
+
+    def test_turkish_headline_is_not_spanish(self):
+        self.assertFalse(looks_spanish("Benzin fiyatları düşüyor"))
+
+    def test_vietnamese_headline_is_not_spanish(self):
+        self.assertFalse(looks_spanish("Giá xăng dầu giảm mạnh"))
+
+    def test_spanish_domain_words_settle_a_short_headline(self):
+        self.assertTrue(looks_spanish("Gasolina Extra baja a 3,175"))
+
+    def test_tickers_only_default_to_spanish(self):
+        self.assertTrue(looks_spanish("WTI 68.40 RBOB 2.05"))
 
 
 class PipelineTranslationTests(unittest.TestCase):
@@ -152,18 +202,19 @@ class PipelineTranslationTests(unittest.TestCase):
         self.assertEqual(editor.calls, [])
 
     def test_spanish_headline_over_english_body_is_translated(self):
+        """A Spanish headline must not hide an untranslated English body."""
         editor = _SpyEditor()
         candidate = Candidate(
             source=self.INTL,
-            title="El diésel sube en Ecuador",
+            title="El diésel sube en Ecuador tras un recorte de suministro",
             url="https://example.test/wire/mixed",
             summary="Diesel is up after a supply cut, traders said.",
             published_at=datetime(2026, 9, 8, 14, 0, tzinfo=timezone.utc),
             detected_at=datetime(2026, 9, 8, 14, 5, tzinfo=timezone.utc),
             content_hash="intl-mixed",
         )
-        self._pipeline(editor).process(candidate)
-        self.assertTrue(editor.calls)
+        result = self._pipeline(editor).process(candidate)
+        self.assertTrue(editor.calls, result.reason)
         joined = "\n".join(self.notifier.messages)
         self.assertIn("El diésel sube en Ecuador", joined)
         self.assertIn("Traducción al español", joined)
@@ -187,12 +238,21 @@ class PipelineTranslationTests(unittest.TestCase):
         self.assertNotIn("النفط", joined)
         self.assertIn("Traducción al español", joined)
 
-    def test_failed_translation_never_surfaces_english(self):
+    def test_failed_translation_labels_the_gap_instead_of_hiding_it(self):
+        """An untranslated story must be labelled, not silently replaced.
+
+        The old behaviour swapped the headline for a generic notice, so the
+        operator could not tell which source had broken and the alert looked
+        like a translation error with no content.
+        """
         self._pipeline(_DeadEditor()).process(self._candidate())
         joined = "\n".join(self.notifier.messages)
-        self.assertNotIn("refinery halts operations", joined)
+        self.assertIn("IDIOMA · sin traducir", joined)
+        self.assertIn("TRADUCCIÓN NO DISPONIBLE", joined)
+        # The original headline is quoted so the story stays identifiable.
+        self.assertIn("«Diesel supply tightens", joined)
+        # But the foreign body prose is never delivered as the flash.
         self.assertNotIn("traders said", joined)
-        self.assertIn("traducción no disponible", joined)
 
     def test_invented_summary_replaced_by_extractive(self):
         editor = _InventingEditor()
